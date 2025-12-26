@@ -19,7 +19,8 @@ async def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id INTEGER UNIQUE,
             name TEXT,
-            status TEXT
+            status TEXT,
+            role TEXT
         )
         ''')
         await db.execute('''
@@ -52,11 +53,11 @@ async def get_user(telegram_id):
         cursor = await db.execute('SELECT * FROM Users WHERE telegram_id = ?', (telegram_id,))
         return await cursor.fetchone()
 
-async def add_user(telegram_id, name, status='pending'):
+async def add_user(telegram_id, name, role='worker', status='pending'):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
-            'INSERT INTO Users (telegram_id, name, status) VALUES (?, ?, ?)',
-            (telegram_id, name, status)
+            'INSERT INTO Users (telegram_id, name, status, role) VALUES (?, ?, ?, ?)',
+            (telegram_id, name, status, role)
         )
         await db.commit()
 
@@ -70,7 +71,8 @@ async def activate_user(telegram_id):
 
 async def get_all_users():
     async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute('SELECT telegram_id, status FROM Users')
+        # Укажите все колонки, которые вы используете в цикле уведомлений
+        cursor = await db.execute('SELECT id, telegram_id, name, status, role FROM Users')
         return await cursor.fetchall()
     
     
