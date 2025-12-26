@@ -1,8 +1,16 @@
+import os
 import aiosqlite
 import pytz
 from datetime import datetime
 
-DB_NAME = "shift_manager.db"
+# 1. Определяем путь к папке, где лежит этот файл (~/bot_shift_manager/bot)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Поднимаемся на уровень выше в корень проекта (~/bot_shift_manager)
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+
+# 3. Путь к базе данных в папке data в корне
+DB_NAME = os.path.join(PROJECT_ROOT, "data", "shift_manager.db")
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
