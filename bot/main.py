@@ -81,8 +81,16 @@ async def notify_all_active_users(bot):
         users = await get_all_users()
         print(f"[INFO] Notifying users after restart...")
         for user_row in users:
-            telegram_id = user_row[2]
+            # ИСПРАВЛЕНИЕ 1: telegram_id находится под индексом 1 (ранее было 2)
+            # Порядок полей в БД: (id, telegram_id, name, status, role)
+            telegram_id = user_row[1] 
             status = user_row[3]
+
+            # ИСПРАВЛЕНИЕ 2: Временный фильтр для тестирования
+            # Срабатывает только если ID пользователя 1285647
+            # if str(telegram_id) != "1285647":
+            #     continue
+            
             if status == "active":
                 try:
                     await bot.send_message(
@@ -90,6 +98,7 @@ async def notify_all_active_users(bot):
                         text="🔄 Bot yeniden başlatıldı. Başlamak için '/start' tuşuna basınız.",
                         reply_markup=start_keyboard
                     )
+                    print(f"[INFO] Notification sent to {telegram_id}")
                 except Exception as e:
                     print(f"[ERROR] Restart mesajı gönderilemedi {telegram_id}: {e}")
     except Exception as e:

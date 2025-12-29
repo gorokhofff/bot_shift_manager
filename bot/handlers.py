@@ -17,8 +17,9 @@ istanbul_tz = pytz.timezone("Europe/Istanbul")
 active_check_pending = {}
 
 # Клавиатуры
+# New (Fixed):
 main_menu = ReplyKeyboardMarkup(
-    [["Yenibosna'da Şift Başлат", "Göktürk'te Şift Başlat"]],
+    [["Yenibosna'da Şift Başlat", "Göktürk'te Şift Başlat"]],
     resize_keyboard=True
 )
 shift_menu = ReplyKeyboardMarkup(
@@ -185,7 +186,10 @@ async def end_shift_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ Aktif bir vardiyanız bulunmamaktadır.")
         return
 
-    shift_id, _, start_time_str, _, location = active_shift
+    # ИСПРАВЛЕНИЕ: Берем значения по индексам, так надежнее
+    shift_id = active_shift[0]       # id
+    start_time_str = active_shift[2] # start_time
+    location = active_shift[4]       # location
 
     try:
         # Расчет длительности

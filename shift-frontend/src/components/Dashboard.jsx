@@ -1,243 +1,211 @@
-import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import API from '../api';
-import ReportsCalendar from './ReportsCalendar'; // Новый компонент календаря
+import SalesLineChart from './Charts/SalesLineChart';
+import ReportsCalendar from './ReportsCalendar';
+import { useLanguage } from '../contexts/LanguageContext';
 
-function Dashboard() {
-  const [users, setUsers] = useState([]);
-  const [shifts, setShifts] = useState([]);
-  const [reports, setReports] = useState([]);
-  const [payrollReports, setPayrollReports] = useState([]);
+const Dashboard = () => {
+  const [activeShifts, setActiveShifts] = useState({ Yenibosna: [], Göktürk: [], Unknown: [] });
+  const [salesStats, setSalesStats] = useState({ totals: null, chart: [] });
+  const [loading, setLoading] = useState(true);
+  // Добавляем состояние для даты графика
+  const [chartDate, setChartDate] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
+  const { t } = useLanguage();
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [usersRes, shiftsRes, reportsRes] = await Promise.all([
-          API.get('/users'),
-          API.get('/shifts'),
-          API.get('/reports')
-        ]);
-
-        setUsers(usersRes.data);
-        setShifts(shiftsRes.data);
-        setReports(reportsRes.data);
-
-        // Пытаемся загрузить отчеты ФОТ (если система уже мигрирована)
-        try {
-          const payrollRes = await API.get('/payroll/reports');
-          setPayrollReports(payrollRes.data || []);
-        } catch (error) {
-          console.log('ФОТ система еще не мигрирована или недоступна');
-          setPayrollReports([]);
-        }
-      } catch (error) {
-        console.error('Ошибка загрузки данных:', error);
-      }
-    }
     fetchData();
-  }, []);
+    // Обновляем таймер смен каждую минуту
+    const interval = setInterval(() => {
+        // Force re-render for time calculation if needed
+        setActiveShifts(prev => ({...prev})); 
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [chartDate]); // Зависимость от даты графика
 
-  const today = new Date().toISOString().split('T')[0];
+  const fetchData = async () => {
+    try {
+      const [shiftsRes, salesRes] = await Promise.all([
+        API.get('/shifts'),
+        API.get(`/dashboard/sales-stats?year=${chartDate.year}&month=${chartDate.month}`)
+      ]);
+      
+      // 1. Обработка активных смен
+      const active = shiftsRes.data.filter(s => !s.end_time);
+      const grouped = { Yenibosna: [], Göktürk: [], Unknown: [] };
+      
+      active.forEach(shift => {
+        const loc = shift.location === 'Yenibosna' || shift.location === 'Göktürk' ? shift.location : 'Unknown';
+        grouped[loc].push(shift);
+      });
+      
+      setActiveShifts(grouped);
+      setSalesStats(salesRes.data);
+      
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const shiftsToday = shifts.filter(s => s.start_time && s.start_time.startsWith(today));
-  const reportsToday = reports.filter(r => r.created_at && r.created_at.startsWith(today));
+  const calculateDuration = (startTime) => {
+    const start = new Date(startTime);
+    const now = new Date();
+    const diffMs = now - start;
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    return { text: `${hours}ч ${minutes}м`, isLong: hours >= 14 };
+  };
 
-  // Статистика по ФОТ
-  const draftPayrollReports = payrollReports.filter(r => r.status === 'draft').length;
-  const finalizedPayrollReports = payrollReports.filter(r => r.status === 'finalized').length;
+  const getPercentageChange = (current, prev) => {
+    if (!prev || prev === 0) return current > 0 ? "+100%" : "0%";
+    const diff = current - prev;
+    const percent = (diff / prev) * 100;
+    const sign = percent > 0 ? "+" : "";
+    return `${sign}${percent.toFixed(1)}%`;
+  };
+
+  if (loading) return <div className="p-8 text-white">{t('loading')}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
-
-      {/* Карточки метрик */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-          <h2 className="text-xl mb-4">Sistemdeki Kullanıcılar</h2>
-          <p className="text-4xl font-bold">{users.length}</p>
-          <Link to="/users" className="text-blue-400 hover:underline">Detaylar</Link>
-        </div>
-
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-          <h2 className="text-xl mb-4">Bugünkü Şiftler</h2>
-          <p className="text-4xl font-bold">{shiftsToday.length}</p>
-          <Link to="/shifts" className="text-blue-400 hover:underline">Detaylar</Link>
-        </div>
-
-        <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-          <h2 className="text-xl mb-4">Bugünkü Raporlar</h2>
-          <p className="text-4xl font-bold">{reportsToday.length}</p>
-          <Link to="/reports" className="text-blue-400 hover:underline">Detaylar</Link>
-        </div>
-
-        {/* Карточка для ФОТ */}
-        <div className="bg-gradient-to-br from-green-800 to-green-600 p-6 rounded-lg shadow-lg border-2 border-green-500">
-          <h2 className="text-xl mb-4 flex items-center">
-            💰 Отчеты ФОТ
-          </h2>
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-sm text-green-100">Черновики:</span>
-            <span className="text-2xl font-bold text-yellow-300">{draftPayrollReports}</span>
+    <div className="p-4 md:p-6 text-white max-w-7xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold">{t('dash_title')}</h1>
+      
+      {/* 1. БЛОК: Кто сейчас работает (Active Shifts) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        {/* YENIBOSNA CARD */}
+        <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-lg">
+          <div className="bg-green-900/30 p-3 border-b border-green-800 flex justify-between items-center">
+             <h3 className="font-bold text-green-400">{t('dash_loc_yenibosna')}</h3>
+             <span className="text-xs bg-green-900 text-green-200 px-2 py-1 rounded-full animate-pulse">
+               {activeShifts.Yenibosna.length} online
+             </span>
           </div>
-          <div className="flex justify-between items-center mb-4">
-            <span className="text-sm text-green-100">Финализированы:</span>
-            <span className="text-2xl font-bold text-green-300">{finalizedPayrollReports}</span>
-          </div>
-          <Link to="/payroll" className="text-green-200 hover:text-white hover:underline font-medium">
-            Управление ФОТ →
-          </Link>
-        </div>
-      </div>
-
-      {/* Календарь отчетов вместо графика */}
-      <div className="mb-8">
-        <ReportsCalendar />
-      </div>
-
-      {/* Быстрые ссылки */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-semibold mb-4">Hızlı Erişim</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Link to="/users" className="block p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-            👥 Kullanıcı Yönetimi
-          </Link>
-          <Link to="/shift-summary" className="block p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-            📊 Şift Özeti
-          </Link>
-          <Link to="/shifts" className="block p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-            ⏰ Şift Yönetimi
-          </Link>
-          <Link to="/reports" className="block p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-            📋 Raporlar (Простые)
-          </Link>
-          <Link to="/reports-parse" className="block p-4 bg-blue-700 rounded-lg hover:bg-blue-600 border-2 border-blue-500 transition-colors">
-            🔧 Парсер Отчетов
-          </Link>
-          
-          {/* Ссылка на ФОТ */}
-          <Link to="/payroll" className="block p-4 bg-gradient-to-r from-green-700 to-green-600 rounded-lg hover:from-green-600 hover:to-green-500 border-2 border-green-500 transition-all duration-200 transform hover:scale-105">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold">💰 Система ФОТ</span>
-              <span className="text-green-200 text-sm">NEW!</span>
-            </div>
-            <p className="text-sm text-green-100 mt-1">Расчет зарплат</p>
-          </Link>
-          
-          <Link to="/rates" className="block p-4 bg-purple-700 rounded-lg hover:bg-purple-600 border-2 border-purple-500 transition-colors">
-            📊 Управление тарифами
-          </Link>
-          
-          <Link to="/adminDashboard" className="block p-4 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors">
-            ⚙️ Админ Панель
-          </Link>
-        </div>
-      </div>
-
-      {/* Последние отчеты ФОТ (если есть) */}
-      {payrollReports.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4">📊 Последние отчеты ФОТ</h2>
-          <div className="bg-gray-800 rounded-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-700">
-                  <tr>
-                    <th className="p-3 text-left">ID</th>
-                    <th className="p-3 text-left">Заведение</th>
-                    <th className="p-3 text-left">Период</th>
-                    <th className="p-3 text-right">Выручка</th>
-                    <th className="p-3 text-center">Статус</th>
-                    <th className="p-3 text-left">Создан</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payrollReports.slice(0, 5).map(report => {
-                    const establishments = {1: "Yenibosna", 2: "Göktürk"};
-                    
-                    return (
-                      <tr key={report.id} className="border-t border-gray-700 hover:bg-gray-750">
-                        <td className="p-3 font-mono text-sm">#{report.id}</td>
-                        <td className="p-3">{establishments[report.establishment_id] || 'Неизвестно'}</td>
-                        <td className="p-3 text-sm">
-                          {new Date(report.period_start).toLocaleDateString('ru-RU')} - 
-                          {new Date(report.period_end).toLocaleDateString('ru-RU')}
-                        </td>
-                        <td className="p-3 text-right font-medium">
-                          {report.revenue ? 
-                            new Intl.NumberFormat('tr-TR', {
-                              style: 'currency',
-                              currency: 'TRY',
-                              minimumFractionDigits: 0
-                            }).format(report.revenue) : 
-                            '—'
-                          }
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            report.status === 'finalized' 
-                              ? 'bg-green-600 text-green-100' 
-                              : 'bg-yellow-600 text-yellow-100'
-                          }`}>
-                            {report.status === 'finalized' ? 'Финализирован' : 'Черновик'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-sm text-gray-400">
-                          {new Date(report.created_at).toLocaleDateString('ru-RU')}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            
-            {payrollReports.length > 5 && (
-              <div className="p-4 border-t border-gray-700 text-center">
-                <Link 
-                  to="/payroll" 
-                  className="text-blue-400 hover:text-blue-300 font-medium"
-                >
-                  Посмотреть все отчеты ФОТ ({payrollReports.length}) →
-                </Link>
-              </div>
+          <div className="p-4 space-y-3">
+            {activeShifts.Yenibosna.length === 0 ? (
+               <p className="text-gray-500 text-sm text-center py-4">{t('dash_no_active')}</p>
+            ) : (
+               activeShifts.Yenibosna.map(s => {
+                 const duration = calculateDuration(s.start_time);
+                 return (
+                   <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-3 rounded border border-gray-600">
+                     <div>
+                       {/* ИЗМЕНЕНИЕ ЗДЕСЬ: Имя и роль в одной строке */}
+                       <div className="font-bold text-sm">
+                         {s.user_name} <span className="text-gray-400 font-normal ml-1 text-xs">({s.role})</span>
+                       </div>
+                     </div>
+                     <div className="text-right">
+                       <div className="text-sm font-mono">{new Date(s.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                       <div className={`text-xs ${duration.isLong ? 'text-red-400 font-bold' : 'text-gray-400'}`}>
+                         {duration.text}
+                       </div>
+                     </div>
+                   </div>
+                 );
+               })
             )}
           </div>
         </div>
-      )}
 
-      {/* Подсказка для первого использования */}
-      {payrollReports.length === 0 && (
-        <div className="bg-gradient-to-r from-blue-900 to-purple-900 p-6 rounded-lg border border-blue-700">
-          <div className="flex items-start space-x-4">
-            <div className="flex-shrink-0">
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                💡
-              </div>
-            </div>
+        {/* GÖKTÜRK CARD */}
+        <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden shadow-lg">
+          <div className="bg-blue-900/30 p-3 border-b border-blue-800 flex justify-between items-center">
+             <h3 className="font-bold text-blue-400">{t('dash_loc_gokturk')}</h3>
+             <span className="text-xs bg-blue-900 text-blue-200 px-2 py-1 rounded-full animate-pulse">
+               {activeShifts.Göktürk.length} online
+             </span>
+          </div>
+          <div className="p-4 space-y-3">
+             {activeShifts.Göktürk.length === 0 ? (
+               <p className="text-gray-500 text-sm text-center py-4">{t('dash_no_active')}</p>
+            ) : (
+               activeShifts.Göktürk.map(s => {
+                 const duration = calculateDuration(s.start_time);
+                 return (
+                   <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-3 rounded border border-gray-600">
+                     <div>
+                       {/* ИЗМЕНЕНИЕ ЗДЕСЬ: Имя и роль в одной строке */}
+                       <div className="font-bold text-sm">
+                         {s.user_name} <span className="text-gray-400 font-normal ml-1 text-xs">({s.role})</span>
+                       </div>
+                     </div>
+                     <div className="text-right">
+                       <div className="text-sm font-mono">{new Date(s.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                       <div className={`text-xs ${duration.isLong ? 'text-red-400 font-bold' : 'text-gray-400'}`}>
+                         {duration.text}
+                       </div>
+                     </div>
+                   </div>
+                 );
+               })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. БЛОК: Статистика продаж (KPI) */}
+      {salesStats.totals && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-semibold mb-2">Новая возможность: Система ФОТ</h3>
-              <p className="text-blue-100 mb-3">
-                Теперь вы можете автоматически рассчитывать зарплаты сотрудников на основе 
-                отработанных часов, продаж кальянов и настраиваемых тарифов.
-              </p>
-              <div className="flex flex-wrap gap-2 mb-4">
-                <span className="bg-blue-700 px-3 py-1 rounded-full text-sm">✅ Автоматический расчет</span>
-                <span className="bg-blue-700 px-3 py-1 rounded-full text-sm">✅ Мотивационные выплаты</span>
-                <span className="bg-blue-700 px-3 py-1 rounded-full text-sm">✅ Учет авансов и вычетов</span>
-                <span className="bg-blue-700 px-3 py-1 rounded-full text-sm">✅ История изменений</span>
-              </div>
-              <Link 
-                to="/payroll" 
-                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                💰 Создать первый отчет ФОТ
-              </Link>
+              <div className="text-gray-400 text-sm font-bold uppercase">{t('dash_loc_yenibosna')}</div>
+              <div className="text-3xl font-bold text-white mt-1">{salesStats.totals.current.Yenibosna} <span className="text-sm font-normal text-gray-500">шт</span></div>
+            </div>
+            <div className={`text-right ${salesStats.totals.current.Yenibosna >= salesStats.totals.prev.Yenibosna ? 'text-green-400' : 'text-red-400'}`}>
+              <div className="text-xl font-bold">{getPercentageChange(salesStats.totals.current.Yenibosna, salesStats.totals.prev.Yenibosna)}</div>
+              <div className="text-xs text-gray-500">{t('dash_vs_prev')}</div>
+            </div>
+          </div>
+
+          <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 flex items-center justify-between">
+            <div>
+              <div className="text-gray-400 text-sm font-bold uppercase">{t('dash_loc_gokturk')}</div>
+              <div className="text-3xl font-bold text-white mt-1">{salesStats.totals.current.Göktürk} <span className="text-sm font-normal text-gray-500">шт</span></div>
+            </div>
+            <div className={`text-right ${salesStats.totals.current.Göktürk >= salesStats.totals.prev.Göktürk ? 'text-green-400' : 'text-red-400'}`}>
+              <div className="text-xl font-bold">{getPercentageChange(salesStats.totals.current.Göktürk, salesStats.totals.prev.Göktürk)}</div>
+              <div className="text-xs text-gray-500">{t('dash_vs_prev')}</div>
             </div>
           </div>
         </div>
       )}
+
+      {/* 3. БЛОК: График продаж */}
+      <div className="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700">
+        <div className="flex flex-wrap justify-between items-center mb-4 gap-4">
+            <h2 className="text-xl font-bold">{t('dash_sales_chart_title')}</h2>
+            
+            {/* Селекторы для графика */}
+            <div className="flex gap-2 w-full sm:w-auto">
+                <select 
+                    value={chartDate.year} 
+                    onChange={e => setChartDate({...chartDate, year: +e.target.value})} 
+                    className="bg-gray-700 border border-gray-600 rounded text-sm p-2 text-white outline-none flex-1 sm:flex-none"
+                >
+                    {[2024, 2025].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <select 
+                    value={chartDate.month} 
+                    onChange={e => setChartDate({...chartDate, month: +e.target.value})} 
+                    className="bg-gray-700 border border-gray-600 rounded text-sm p-2 text-white outline-none flex-1 sm:flex-none"
+                >
+                    {Array.from({length:12},(_,i)=>i).map(i => <option key={i} value={i+1}>{t(`month_${i+1}`)}</option>)}
+                </select>
+            </div>
+        </div>
+        
+        <div className="h-64 md:h-80 w-full">
+          <SalesLineChart data={salesStats.chart} />
+        </div>
+      </div>
+
+      {/* 4. БЛОК: Календарь */}
+      <ReportsCalendar />
+      
     </div>
   );
-}
+};
 
 export default Dashboard;

@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import API from '../api';
 import { parseISO, getYear, getMonth } from 'date-fns';
-
-const monthNames = [
-  'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
-  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
-];
+import { useLanguage } from '../contexts/LanguageContext';
 
 function ShiftSummary() {
   const [users, setUsers] = useState([]);
@@ -17,36 +13,42 @@ function ShiftSummary() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedLocation, setSelectedLocation] = useState('');
+  
+  // Подключаем переводы
+  const { t, getMonthName } = useLanguage();
 
   useEffect(() => {
     fetchData();
   }, [selectedYear, selectedMonth, selectedLocation]);
 
   const fetchData = async () => {
-    const usersRes = await API.get('/users');
-    const shiftsRes = await API.get('/shifts');
-    
-    // Получаем индивидуальные расписания для всех сотрудников
-    const schedulePromises = usersRes.data.map(user => 
-      API.get(`/employee-schedules/${user.id}/${selectedYear}/${selectedMonth + 1}`)
-        .catch(() => ({ data: {} }))
-    );
-    const schedulesRes = await Promise.all(schedulePromises);
-    
-    const allSchedules = {};
-    usersRes.data.forEach((user, index) => {
-      allSchedules[user.id] = schedulesRes[index].data;
-    });
-    
-    setUsers(usersRes.data);
-    setShifts(shiftsRes.data);
-    setEmployeeSchedules(allSchedules);
-    extractLocations(shiftsRes.data);
-    calculateSummary(usersRes.data, shiftsRes.data);
+    try {
+      const usersRes = await API.get('/users');
+      const shiftsRes = await API.get('/shifts');
+      
+      const schedulePromises = usersRes.data.map(user => 
+        API.get(`/employee-schedules/${user.id}/${selectedYear}/${selectedMonth + 1}`)
+          .catch(() => ({ data: {} }))
+      );
+      const schedulesRes = await Promise.all(schedulePromises);
+      
+      const allSchedules = {};
+      usersRes.data.forEach((user, index) => {
+        allSchedules[user.id] = schedulesRes[index].data;
+      });
+      
+      setUsers(usersRes.data);
+      setShifts(shiftsRes.data);
+      setEmployeeSchedules(allSchedules);
+      extractLocations(shiftsRes.data);
+      calculateSummary(usersRes.data, shiftsRes.data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const extractLocations = (shiftsData) => {
-    const uniqueLocations = [...new Set(shiftsData.map(shift => shift.location))];
+    const uniqueLocations = [...new Set(shiftsData.map(shift => shift.location))].filter(Boolean);
     setLocations(uniqueLocations);
   };
 
@@ -66,19 +68,16 @@ function ShiftSummary() {
         summaryData[userId] = {};
       }
       
-      // Суммируем часы если уже есть запись на этот день
       summaryData[userId][day] = (summaryData[userId][day] || 0) + (shift.duration_hours || 0);
     });
 
     setSummary(summaryData);
   };
 
-  // Функция для форматирования времени в ЧЧ:ММ с округлением до 15 минут (компактно)
   const formatHours = (hours) => {
-    if (!hours || hours === 0) return <span className="text-gray-500 text-xs">-</span>;
+    if (!hours || hours === 0) return <span className="text-gray-600 text-xs">-</span>;
     
     const totalMinutes = Math.round(hours * 60);
-    // Округляем до кратного 15
     const roundedMinutes = Math.round(totalMinutes / 15) * 15;
     
     const displayHours = Math.floor(roundedMinutes / 60);
@@ -92,38 +91,33 @@ function ShiftSummary() {
     );
   };
 
-  // Функция для получения CSS класса ячейки на основе индивидуального расписания
   const getCellClass = (userId, day, hours) => {
     const today = new Date();
     const currentDay = today.getDate();
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
     
-    // Только для прошедших дней
     if (selectedYear > currentYear || 
         (selectedYear === currentYear && selectedMonth > currentMonth) ||
         (selectedYear === currentYear && selectedMonth === currentMonth && day >= currentDay)) {
-      return "p-1 border border-gray-600 text-center align-middle w-9 h-8";
+      return "p-1 border border-gray-700 text-center align-middle w-9 h-9";
     }
     
-    // Проверяем индивидуальное расписание сотрудника
     const userSchedule = employeeSchedules[userId] || {};
     const daySchedule = userSchedule[day];
-    const isWorkday = daySchedule ? daySchedule.is_workday : true; // По умолчанию рабочий день
+    const isWorkday = daySchedule ? daySchedule.is_workday : true;
     
     if (isWorkday) {
-      // Рабочий день: красный если не работал или отрицательные часы
       if (!hours || hours <= 0) {
-        return "p-1 border border-gray-600 text-center align-middle w-9 h-8 bg-red-800 text-red-200";
+        return "p-1 border border-gray-700 text-center align-middle w-9 h-9 bg-red-900/40 text-red-200";
       }
     } else {
-      // Выходной день: оранжевый если работал
       if (hours > 0) {
-        return "p-1 border border-gray-600 text-center align-middle w-9 h-8 bg-blue-800 text-orange-200";
+        return "p-1 border border-gray-700 text-center align-middle w-9 h-9 bg-blue-900/40 text-blue-200";
       }
     }
     
-    return "p-1 border border-gray-600 text-center align-middle w-9 h-8";
+    return "p-1 border border-gray-700 text-center align-middle w-9 h-9";
   };
 
   const handleSort = (key) => {
@@ -170,20 +164,22 @@ function ShiftSummary() {
 
   const renderSortArrow = (key) => {
     if (sortConfig.key !== key) return null;
-    return sortConfig.direction === 'asc' ? ' ▲' : ' ▼';
+    return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
   };
 
   return (
-    <div className="px-2 py-4 w-full flex justify-center bg-gray-900 min-h-screen">
-      <div className="w-full max-w-full px-2">
-        <h1 className="text-2xl mb-6 font-bold text-white text-center">Shift Summary</h1>
-        <div className="flex flex-wrap justify-center items-center gap-3 mb-4 px-2">
-          <div className="flex flex-col text-white">
-            <label className="text-sm mb-1">Yıl</label>
+    <div className="p-4 w-full bg-gray-900 min-h-screen text-white">
+      <div className="max-w-full mx-auto">
+        <h1 className="text-2xl mb-6 font-bold text-center">{t('summ_title')}</h1>
+        
+        {/* Фильтры */}
+        <div className="flex justify-center gap-4 mb-6">
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-400 mb-1">{t('sched_year')}</label>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className="p-2 bg-gray-800 text-white rounded-md shadow text-sm"
+              className="p-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
             >
               {[2023, 2024, 2025].map(year => (
                 <option key={year} value={year}>{year}</option>
@@ -191,27 +187,27 @@ function ShiftSummary() {
             </select>
           </div>
 
-          <div className="flex flex-col text-white">
-            <label className="text-sm mb-1">Ay</label>
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-400 mb-1">{t('sched_month')}</label>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-              className="p-2 bg-gray-800 text-white rounded-md shadow text-sm"
+              className="p-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
             >
-              {monthNames.map((month, i) => (
-                <option key={i} value={i}>{month}</option>
+              {Array.from({length: 12}, (_, i) => i).map((i) => (
+                <option key={i} value={i}>{getMonthName(i)}</option>
               ))}
             </select>
           </div>
 
-          <div className="flex flex-col text-white">
-            <label className="text-sm mb-1">Lokasyon</label>
+          <div className="flex flex-col">
+            <label className="text-xs text-gray-400 mb-1">{t('sched_location')}</label>
             <select
               value={selectedLocation}
               onChange={(e) => setSelectedLocation(e.target.value)}
-              className="p-2 bg-gray-800 text-white rounded-md shadow text-sm"
+              className="p-2 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500"
             >
-              <option value="">Tümü</option>
+              <option value="">{t('sched_all_locations')}</option>
               {locations.map(loc => (
                 <option key={loc} value={loc}>{loc}</option>
               ))}
@@ -219,24 +215,27 @@ function ShiftSummary() {
           </div>
         </div>
 
-        <div className="w-full overflow-x-auto rounded-xl shadow-xl border border-gray-700 bg-gray-800">
-          <table className="w-full text-white" style={{ minWidth: 'max-content' }}>
+        {/* Таблица */}
+        <div className="overflow-x-auto rounded border border-gray-700 bg-gray-800">
+          <table className="w-full text-sm border-collapse">
             <thead className="bg-gray-700">
               <tr>
-                <th className="p-2 border border-gray-600 cursor-pointer whitespace-nowrap text-left w-28 text-sm" onClick={() => handleSort('name')}>
-                  Name{renderSortArrow('name')}
+                <th className="p-3 border-b border-r border-gray-600 cursor-pointer text-left min-w-[150px] sticky left-0 bg-gray-700 z-10" onClick={() => handleSort('name')}>
+                  {t('summ_name')}{renderSortArrow('name')}
                 </th>
                 {daysInMonth.map(day => (
-                  <th key={day} className="p-1 border border-gray-600 text-center text-xs w-9 h-8">{day}</th>
+                  <th key={day} className="p-1 border-b border-r border-gray-600 text-center w-9 text-xs text-gray-400 font-normal">
+                    {day}
+                  </th>
                 ))}
-                <th className="p-1 border border-gray-600 cursor-pointer whitespace-nowrap text-center w-12 text-xs" onClick={() => handleSort('firstHalf')}>
+                <th className="p-2 border-b border-r border-gray-600 cursor-pointer text-center w-16 text-xs font-semibold" onClick={() => handleSort('firstHalf')}>
                   1–15{renderSortArrow('firstHalf')}
                 </th>
-                <th className="p-1 border border-gray-600 cursor-pointer whitespace-nowrap text-center w-12 text-xs" onClick={() => handleSort('secondHalf')}>
+                <th className="p-2 border-b border-r border-gray-600 cursor-pointer text-center w-16 text-xs font-semibold" onClick={() => handleSort('secondHalf')}>
                   16–31{renderSortArrow('secondHalf')}
                 </th>
-                <th className="p-1 border border-gray-600 cursor-pointer whitespace-nowrap text-center w-14 text-xs" onClick={() => handleSort('monthlyTotal')}>
-                  Итог{renderSortArrow('monthlyTotal')}
+                <th className="p-2 border-b border-gray-600 cursor-pointer text-center w-16 text-xs font-bold text-blue-300" onClick={() => handleSort('monthlyTotal')}>
+                  {t('summ_total')}{renderSortArrow('monthlyTotal')}
                 </th>
               </tr>
             </thead>
@@ -251,8 +250,10 @@ function ShiftSummary() {
                 if (monthlyTotal === 0) return null;
 
                 return (
-                  <tr key={user.id} className="odd:bg-gray-700">
-                    <td className="p-2 border border-gray-600 font-semibold text-xs whitespace-nowrap">{user.name}</td>
+                  <tr key={user.id} className="hover:bg-gray-700/50 transition-colors group">
+                    <td className="p-2 border-b border-r border-gray-700 font-medium whitespace-nowrap sticky left-0 bg-gray-800 group-hover:bg-gray-700/50 z-10">
+                      {user.name}
+                    </td>
                     {daysInMonth.map(day => {
                       const hours = userSummary[day] || 0;
                       return (
@@ -261,9 +262,9 @@ function ShiftSummary() {
                         </td>
                       );
                     })}
-                    <td className="p-1 border border-gray-600 text-center font-semibold text-xs">{formatHours(firstHalfSum)}</td>
-                    <td className="p-1 border border-gray-600 text-center font-semibold text-xs">{formatHours(secondHalfSum)}</td>
-                    <td className="p-1 border border-gray-600 text-center font-bold text-xs">{formatHours(monthlyTotal)}</td>
+                    <td className="p-1 border-b border-r border-gray-700 text-center font-medium bg-gray-800/30">{formatHours(firstHalfSum)}</td>
+                    <td className="p-1 border-b border-r border-gray-700 text-center font-medium bg-gray-800/30">{formatHours(secondHalfSum)}</td>
+                    <td className="p-1 border-b border-gray-700 text-center font-bold text-blue-300 bg-gray-800/50">{formatHours(monthlyTotal)}</td>
                   </tr>
                 );
               })}
@@ -271,46 +272,20 @@ function ShiftSummary() {
           </table>
         </div>
         
-        {/* Легенда цветов */}
-        <div className="mt-6 bg-gray-800 rounded-lg p-4 border border-gray-700">
-          <h3 className="text-lg font-semibold mb-3 text-white">📋 Легенда</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div className="flex items-center gap-3 p-3 bg-red-900 border border-red-700 rounded-lg">
-              <div className="w-6 h-6 bg-red-800 border border-red-600 rounded flex items-center justify-center">
-                <span className="text-red-200 text-xs font-bold">08<br/>15</span>
-              </div>
-              <div>
-                <div className="font-semibold text-red-200">🔴 Красный</div>
-                <div className="text-red-300 text-xs">Не отметился, а смена была по расписанию</div>
-              </div>
+        {/* Легенда */}
+        <div className="mt-6 flex flex-wrap gap-6 justify-center text-xs text-gray-400">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-red-900/40 border border-red-800 rounded flex items-center justify-center text-[10px] text-red-200 font-bold">8</div>
+              <span>{t('summ_legend_red')}</span>
             </div>
-            
-            <div className="flex items-center gap-3 p-3 bg-blue-900 border border-blue-700 rounded-lg">
-              <div className="w-6 h-6 bg-blue-800 border border-blue-600 rounded flex items-center justify-center">
-                <span className="text-blue-200 text-xs font-bold">08<br/>15</span>
-              </div>
-              <div>
-                <div className="font-semibold text-blue-200">🔵 Синий</div>
-                <div className="text-blue-300 text-xs">Отметился, а по расписанию выходной</div>
-              </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-blue-900/40 border border-blue-800 rounded flex items-center justify-center text-[10px] text-blue-200 font-bold">8</div>
+              <span>{t('summ_legend_blue')}</span>
             </div>
-            
-            <div className="flex items-center gap-3 p-3 bg-gray-700 border border-gray-600 rounded-lg">
-              <div className="w-6 h-6 bg-gray-600 border border-gray-500 rounded flex items-center justify-center">
-                <span className="text-gray-200 text-xs font-bold">08<br/>15</span>
-              </div>
-              <div>
-                <div className="font-semibold text-gray-200">⚫ Бесцветный</div>
-                <div className="text-gray-300 text-xs">Все ровно: работал по расписанию или отдыхал в выходной</div>
-              </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border border-gray-700 rounded flex items-center justify-center text-[10px] text-gray-400 font-bold">8</div>
+              <span>{t('summ_legend_norm')}</span>
             </div>
-          </div>
-          
-          <div className="mt-3 pt-3 border-t border-gray-600">
-            <p className="text-xs text-gray-400 text-center">
-              💡 Подсветка действует только для прошедших дней. Будущие дни отображаются обычным цветом.
-            </p>
-          </div>
         </div>
       </div>
     </div>

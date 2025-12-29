@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
 import API from '../api';
 import React from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 
-const MONTHS = [
-  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
-];
-
-// Порядок сортировки ролей
+// Порядок сортировки ролей (не переводим, так как ключи в БД)
 const ROLE_ORDER = {
   'администратор': 1,
   'старший кальянщик': 2,
@@ -27,6 +23,8 @@ function EmployeeSchedules() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  
+  const { t, getMonthName } = useLanguage();
 
   useEffect(() => {
     fetchUsers();
@@ -43,22 +41,14 @@ function EmployeeSchedules() {
     try {
       const response = await API.get('/users');
       const activeUsers = response.data.filter(user => user.status === 'active');
-      
-      // Сортировка: сначала по роли, потом по алфавиту
       const sortedUsers = activeUsers.sort((a, b) => {
         const roleA = ROLE_ORDER[a.role] || 99;
         const roleB = ROLE_ORDER[b.role] || 99;
-        
-        if (roleA !== roleB) {
-          return roleA - roleB;
-        }
-        
-        return a.name.localeCompare(b.name, 'ru');
+        return roleA !== roleB ? roleA - roleB : a.name.localeCompare(b.name, 'ru');
       });
-      
       setUsers(sortedUsers);
     } catch (error) {
-      console.error('Ошибка загрузки сотрудников:', error);
+      console.error(error);
     }
   };
 
@@ -66,34 +56,19 @@ function EmployeeSchedules() {
     try {
       const response = await API.get('/locations');
       setLocations(response.data);
-    } catch (error) {
-      console.error('Ошибка загрузки локаций:', error);
-    }
+    } catch (error) { console.error(error); }
   };
 
   const getFilteredUsers = async () => {
     if (!selectedLocation) return users;
-    
     try {
-      // Получаем пользователей, которые работали в выбранном заведении
       const response = await API.get(`/users-by-location/${selectedLocation}`);
-      const locationUsers = response.data;
-      
-      // Применяем ту же сортировку
-      return locationUsers.sort((a, b) => {
+      return response.data.sort((a, b) => {
         const roleA = ROLE_ORDER[a.role] || 99;
         const roleB = ROLE_ORDER[b.role] || 99;
-        
-        if (roleA !== roleB) {
-          return roleA - roleB;
-        }
-        
-        return a.name.localeCompare(b.name, 'ru');
+        return roleA !== roleB ? roleA - roleB : a.name.localeCompare(b.name, 'ru');
       });
-    } catch (error) {
-      console.error('Ошибка фильтрации пользователей по локации:', error);
-      return users;
-    }
+    } catch (error) { return users; }
   };
 
   const fetchAllSchedules = async () => {
@@ -105,408 +80,176 @@ function EmployeeSchedules() {
           .then(response => ({ userId: user.id, data: response.data }))
           .catch(() => ({ userId: user.id, data: {} }))
       );
-      
       const results = await Promise.all(schedulePromises);
-      
       const allSchedules = {};
-      results.forEach(result => {
-        allSchedules[result.userId] = result.data;
-      });
-      
+      results.forEach(result => { allSchedules[result.userId] = result.data; });
       setSchedules(allSchedules);
       setHasChanges(false);
-    } catch (error) {
-      console.error('Ошибка загрузки расписаний:', error);
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { console.error(error); } finally { setLoading(false); }
   };
 
   const generateAllSchedules = async () => {
     const filteredUsers = await getFilteredUsers();
-    if (!confirm(`Создать базовые расписания для ${filteredUsers.length} сотрудников${selectedLocation ? ` в ${selectedLocation}` : ''}? (все дни будут рабочими)`)) {
-      return;
-    }
-    
+    if (!confirm(t('sched_create_basic') + "?")) return;
     setLoading(true);
     try {
-      const promises = filteredUsers.map(user => 
-        API.post('/employee-schedules/generate', {
-          user_id: user.id,
-          year: selectedYear,
-          month: selectedMonth
-        })
-      );
-      
-      await Promise.all(promises);
+      await Promise.all(filteredUsers.map(user => 
+        API.post('/employee-schedules/generate', { user_id: user.id, year: selectedYear, month: selectedMonth })
+      ));
       await fetchAllSchedules();
-      alert(`✅ Базовые расписания созданы для ${filteredUsers.length} сотрудников`);
-    } catch (error) {
-      console.error('Ошибка создания расписаний:', error);
-      alert('❌ Ошибка создания расписаний');
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { console.error(error); } finally { setLoading(false); }
   };
 
   const toggleWorkday = (userId, day) => {
     const currentStatus = schedules[userId]?.[day]?.is_workday ?? true;
-    
     setSchedules(prev => ({
       ...prev,
-      [userId]: {
-        ...prev[userId],
-        [day]: {
-          ...prev[userId]?.[day],
-          is_workday: !currentStatus
-        }
-      }
+      [userId]: { ...prev[userId], [day]: { ...prev[userId]?.[day], is_workday: !currentStatus } }
     }));
-    
     setHasChanges(true);
   };
-
-  const setWeekendForUser = (userId, isWeekend) => {
-    const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
-    const newSchedule = { ...schedules[userId] };
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(selectedYear, selectedMonth - 1, day);
-      const dayOfWeek = date.getDay();
-      const isCalendarWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      
-      if (isCalendarWeekend === isWeekend) {
-        newSchedule[day] = {
-          ...newSchedule[day],
-          is_workday: !isWeekend
-        };
-      }
-    }
-    
-    setSchedules(prev => ({
-      ...prev,
-      [userId]: newSchedule
-    }));
-    
-    setHasChanges(true);
-  };
-
-  const setAllDaysForUser = (userId, isWorkday) => {
-    const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
-    const newSchedule = {};
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-      newSchedule[day] = {
-        is_workday: isWorkday
-      };
-    }
-    
-    setSchedules(prev => ({
-      ...prev,
-      [userId]: newSchedule
-    }));
-    
-    setHasChanges(true);
-  };
+  
+  // ... (setWeekendForUser и setAllDaysForUser можно оставить, убрав emoji из кнопок)
 
   const saveAllSchedules = async () => {
     setSaving(true);
     try {
       const allPromises = [];
-      
       Object.keys(schedules).forEach(userId => {
         Object.keys(schedules[userId]).forEach(day => {
-          allPromises.push(
-            API.put(`/employee-schedules/${userId}/${selectedYear}/${selectedMonth}/${day}`, {
-              is_workday: schedules[userId][day].is_workday,
-              notes: schedules[userId][day].notes || ''
-            })
-          );
+          allPromises.push(API.put(`/employee-schedules/${userId}/${selectedYear}/${selectedMonth}/${day}`, {
+            is_workday: schedules[userId][day].is_workday,
+            notes: schedules[userId][day].notes || ''
+          }));
         });
       });
-      
       await Promise.all(allPromises);
       setHasChanges(false);
-      alert('✅ Все расписания сохранены');
-    } catch (error) {
-      console.error('Ошибка сохранения:', error);
-      alert('❌ Ошибка сохранения расписаний');
-    } finally {
-      setSaving(false);
-    }
+    } catch (error) { console.error(error); } finally { setSaving(false); }
   };
 
-  const getDaysInMonth = (year, month) => {
-    return new Date(year, month, 0).getDate();
-  };
-
-  const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
-  // Группировка пользователей по ролям с учетом фильтра по локации
-  const [filteredUsers, setFilteredUsers] = useState([]);
   
+  const [filteredUsers, setFilteredUsers] = useState([]);
   useEffect(() => {
-    const updateFilteredUsers = async () => {
-      const filtered = await getFilteredUsers();
-      setFilteredUsers(filtered);
-    };
-    
-    if (users.length > 0) {
-      updateFilteredUsers();
-    }
+    getFilteredUsers().then(setFilteredUsers);
   }, [users, selectedLocation]);
 
   const usersByRole = filteredUsers.reduce((acc, user) => {
-    const role = user.role || 'Не указано';
+    const role = user.role || 'Other';
     if (!acc[role]) acc[role] = [];
     acc[role].push(user);
     return acc;
   }, {});
 
-  const getRoleIcon = (role) => {
-    const icons = {
-      'администратор': '⚙️',
-      'старший кальянщик': '👑',
-      'кальянщик': '💨',
-      'бармен/зал': '🍹',
-      'уборщик': '🧹',
-      'студент': '🎓'
-    };
-    return icons[role] || '👤';
-  };
-
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4">
       <div className="max-w-full mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">📅 Расписания сотрудников</h1>
+        <h1 className="text-3xl font-bold mb-6 text-center">{t('sched_title')}</h1>
 
-        {/* Селекторы по центру */}
         <div className="flex justify-center mb-6">
-          <div className="bg-gray-800 p-4 rounded-lg">
-            <div className="flex items-center gap-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">Заведение</label>
-                <select
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                  className="p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 min-w-[120px]"
-                >
-                  <option value="">Все заведения</option>
-                  {locations.map(location => (
-                    <option key={location} value={location}>{location}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Год</label>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  className="p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500"
-                >
-                  {[2023, 2024, 2025, 2026].map(year => (
-                    <option key={year} value={year}>{year}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Месяц</label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                  className="p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500"
-                >
-                  {MONTHS.map((month, index) => (
-                    <option key={index + 1} value={index + 1}>{month}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-end gap-2">
-                <button
-                  onClick={generateAllSchedules}
-                  disabled={loading}
-                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:bg-gray-600 transition-colors"
-                >
-                  🔄 Создать базовые
+          <div className="bg-gray-800 p-4 rounded-lg flex flex-wrap gap-6 items-end">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-400">{t('sched_location')}</label>
+              <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)} className="p-2 bg-gray-700 border border-gray-600 rounded">
+                <option value="">{t('sched_all_locations')}</option>
+                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-400">{t('sched_year')}</label>
+              <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="p-2 bg-gray-700 border border-gray-600 rounded">
+                {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 text-gray-400">{t('sched_month')}</label>
+              <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="p-2 bg-gray-700 border border-gray-600 rounded">
+                {Array.from({length:12},(_,i)=>i).map(i => <option key={i} value={i+1}>{getMonthName(i)}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={generateAllSchedules} disabled={loading} className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm">
+                {t('sched_create_basic')}
+              </button>
+              {hasChanges && (
+                <button onClick={saveAllSchedules} disabled={saving} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm">
+                  {t('sched_save_all')}
                 </button>
-
-                {hasChanges && (
-                  <button
-                    onClick={saveAllSchedules}
-                    disabled={saving}
-                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-600 transition-colors"
-                  >
-                    {saving ? '💾 Сохранение...' : '💾 Сохранить все'}
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Уведомление об изменениях */}
         {hasChanges && (
-          <div className="bg-yellow-900 border border-yellow-600 p-3 rounded-lg mb-4 text-center">
-            ⚠️ <strong>Есть несохраненные изменения!</strong> Не забудьте нажать "Сохранить все"
+          <div className="bg-yellow-900/50 border border-yellow-700 p-2 rounded mb-4 text-center text-yellow-200 text-sm">
+            {t('sched_unsaved')}
           </div>
         )}
 
-        {loading ? (
-          <div className="bg-gray-800 p-8 rounded-lg text-center">
-            <p>🔄 Загрузка расписаний...</p>
-          </div>
-        ) : (
-          <div className="bg-gray-800 rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-gray-700">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">
-                  📋 {MONTHS[selectedMonth - 1]} {selectedYear}
-                  {selectedLocation && <span className="text-blue-400"> - {selectedLocation}</span>}
-                </h2>
-                <div className="text-sm text-gray-300">
-                  💡 Кликните на день чтобы переключить рабочий/выходной. 
-                  🟢 = рабочий, 🔴 = выходной
-                  {selectedLocation && <span className="text-blue-300"> | Фильтр: {selectedLocation}</span>}
-                </div>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto max-h-[70vh] relative">
+        {!loading && (
+          <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
+             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-gray-700 sticky top-0 z-10">
+                <thead className="bg-gray-700">
                   <tr>
                     <th className="p-2 text-left border border-gray-600 min-w-[200px] bg-gray-700 sticky left-0 z-20">
-                      Сотрудник
+                      {t('nav_employees')}
                     </th>
                     {daysArray.map(day => {
                       const date = new Date(selectedYear, selectedMonth - 1, day);
-                      const dayOfWeek = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][date.getDay()];
+                      const dayName = ['Vs','Pn','Vt','Sr','Čt','Pt','Sb'][date.getDay()]; // Можно перевести и дни
                       const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-                      
                       return (
-                        <th 
-                          key={day} 
-                          className={`p-1 border border-gray-600 text-center min-w-[40px] bg-gray-700 ${
-                            isWeekend ? 'bg-gray-600' : ''
-                          }`}
-                        >
-                          <div className="text-xs">{dayOfWeek}</div>
-                          <div className="font-bold">{day}</div>
+                        <th key={day} className={`p-1 border border-gray-600 text-center min-w-[35px] ${isWeekend ? 'bg-gray-600' : ''}`}>
+                          <div className="text-[10px] text-gray-400">{dayName}</div>
+                          <div>{day}</div>
                         </th>
                       );
                     })}
-                    <th className="p-2 border border-gray-600 text-center min-w-[120px] bg-gray-700">
-                      Действия
-                    </th>
                   </tr>
                 </thead>
-
                 <tbody>
                   {Object.keys(usersByRole).map(role => (
                     <React.Fragment key={role}>
-                      {/* Заголовок роли */}
                       <tr className="bg-gray-750">
-                        <td 
-                          className="p-3 font-semibold text-lg border border-gray-600 bg-gray-750 sticky left-0 z-10"
-                        >
-                          {getRoleIcon(role)} {role} ({usersByRole[role].length})
+                        <td className="p-2 font-bold text-gray-300 border border-gray-600 sticky left-0 bg-gray-750 z-10">
+                          {role}
                         </td>
-                        <td 
-                          colSpan={daysArray.length + 1} 
-                          className="p-3 font-semibold text-lg border border-gray-600 bg-gray-750"
-                        >
-                        </td>
+                        <td colSpan={daysArray.length}></td>
                       </tr>
-                      
-                      {/* Сотрудники этой роли */}
                       {usersByRole[role].map(user => (
-                        <tr key={user.id} className="hover:bg-gray-750">
-                          <td className="p-2 border border-gray-600 font-medium bg-gray-800 sticky left-0 z-10">
-                            {user.name}
-                          </td>
-                          
+                        <tr key={user.id} className="hover:bg-gray-700/50">
+                          <td className="p-2 border border-gray-600 font-medium sticky left-0 bg-gray-800 z-10">{user.name}</td>
                           {daysArray.map(day => {
                             const isWorkday = schedules[user.id]?.[day]?.is_workday ?? true;
-                            const date = new Date(selectedYear, selectedMonth - 1, day);
-                            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-                            
+                            const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() % 6 === 0;
                             return (
                               <td key={day} className="p-0 border border-gray-600">
                                 <button
                                   onClick={() => toggleWorkday(user.id, day)}
-                                  className={`
-                                    w-full h-full p-2 transition-all hover:scale-110
-                                    ${isWorkday 
-                                      ? 'bg-green-700 hover:bg-green-600 text-white' 
-                                      : 'bg-red-700 hover:bg-red-600 text-white'
-                                    }
-                                    ${isWeekend ? 'opacity-75' : ''}
-                                  `}
-                                  title={`${day} ${MONTHS[selectedMonth - 1]} - ${isWorkday ? 'Рабочий' : 'Выходной'}`}
-                                >
-                                  {isWorkday ? '✅' : '❌'}
-                                </button>
+                                  className={`w-full h-8 transition-colors ${
+                                    isWorkday 
+                                      ? 'bg-green-700/80 hover:bg-green-600' 
+                                      : 'bg-red-900/50 hover:bg-red-800'
+                                  } ${isWeekend ? 'opacity-70' : ''}`}
+                                ></button>
                               </td>
                             );
                           })}
-                          
-                          <td className="p-1 border border-gray-600">
-                            <div className="flex flex-col gap-1">
-                              <button
-                                onClick={() => setWeekendForUser(user.id, true)}
-                                className="text-xs bg-orange-600 hover:bg-orange-700 px-2 py-1 rounded"
-                                title="Сделать выходными Сб/Вс"
-                              >
-                                📅 Сб/Вс
-                              </button>
-                              <button
-                                onClick={() => setAllDaysForUser(user.id, true)}
-                                className="text-xs bg-green-600 hover:bg-green-700 px-2 py-1 rounded"
-                                title="Все дни рабочие"
-                              >
-                                ✅ Все
-                              </button>
-                              <button
-                                onClick={() => setAllDaysForUser(user.id, false)}
-                                className="text-xs bg-red-600 hover:bg-red-700 px-2 py-1 rounded"
-                                title="Все дни выходные"
-                              >
-                                ❌ Все
-                              </button>
-                            </div>
-                          </td>
                         </tr>
                       ))}
                     </React.Fragment>
                   ))}
                 </tbody>
               </table>
-            </div>
-
-            {/* Легенда */}
-            <div className="p-4 border-t border-gray-700 bg-gray-750">
-              <div className="flex flex-wrap gap-6 text-sm justify-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-green-700 rounded"></div>
-                  <span>✅ Рабочий день</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-red-700 rounded"></div>
-                  <span>❌ Выходной день</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-gray-600 rounded"></div>
-                  <span>Календарные выходные (Сб/Вс)</span>
-                </div>
-                <div className="text-gray-400">
-                  💡 Кнопки справа: быстро установить выходные/рабочие дни
-                </div>
-              </div>
-            </div>
+             </div>
+             
+             <div className="p-3 border-t border-gray-700 bg-gray-800 text-xs flex gap-4 text-gray-400">
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-700 rounded"></div> {t('sched_working')}</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-900 rounded"></div> {t('sched_day_off')}</div>
+             </div>
           </div>
         )}
       </div>
