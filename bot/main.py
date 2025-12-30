@@ -14,8 +14,8 @@ from telegram.ext import ContextTypes
 # МЫ ИЗМЕНИЛИ ИМПОРТЫ ЗДЕСЬ: Добавили префикс 'bot.'
 from bot.handlers import (
     start, register_name, start_shift_handler, create_report_handler,
-    end_shift_handler, receive_report, active_check_pending,
-    notify_user_deactivated # Добавлено, так как используется ниже
+    end_shift_handler, receive_report, my_stats_handler, # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
+    active_check_pending, notify_user_deactivated
 )
 from bot.database import init_db, get_user, get_all_users
 from bot.config import BOT_TOKEN
@@ -117,11 +117,16 @@ async def main():
             "register_name": [MessageHandler(filters.TEXT & ~filters.COMMAND, register_name)],
             "main_menu": [
                 MessageHandler(filters.Regex("^Start$"), start),
+                # Кнопки смен
                 MessageHandler(filters.Regex("^(Yenibosna'da Şift Başlat|Göktürk'te Şift Başlat)$"), start_shift_handler),
+                # Кнопка статистики
+                MessageHandler(filters.Regex("^İstatistiklerim$"), my_stats_handler), 
             ],
             "shift_menu": [
                 MessageHandler(filters.Regex("^Rapor Oluştur$"), create_report_handler),
                 MessageHandler(filters.Regex("^Şift Bitir$"), end_shift_handler),
+                # Можно разрешить смотреть статистику и во время смены, если хотите:
+                MessageHandler(filters.Regex("^İstatistiklerim$"), my_stats_handler), 
             ],
             "waiting_report": [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_report)],
         },

@@ -19,9 +19,13 @@ active_check_pending = {}
 # Клавиатуры
 # New (Fixed):
 main_menu = ReplyKeyboardMarkup(
-    [["Yenibosna'da Şift Başlat", "Göktürk'te Şift Başlat"]],
+    [
+        ["Yenibosna'da Şift Başlat", "Göktürk'te Şift Başlat"],
+        ["İstatistiklerim"]  # Добавили кнопку статистики
+    ],
     resize_keyboard=True
 )
+
 shift_menu = ReplyKeyboardMarkup(
     [["Rapor Oluştur", "Şift Bitir"]],
     resize_keyboard=True
@@ -227,3 +231,43 @@ async def notify_user_deactivated(bot, telegram_id):
         )
     except Exception as e:
         print(f"[ERROR] Failed to notify deactivated user {telegram_id}: {e}")
+
+# --- НОВЫЙ ХЕНДЛЕР: СТАТИСТИКА ---
+async def my_stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает краткую статистику пользователя за текущий месяц"""
+    user = await get_user(update.effective_user.id)
+    if not user: return
+    
+    user_id = user[0]
+    now = datetime.now(istanbul_tz)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0).strftime("%Y-%m-%d")
+    
+    # Считаем часы и смены за этот месяц (можно вынести в database.py)
+    # Здесь пример прямого подсчета для скорости:
+    import aiosqlite
+    from bot.database import DB_NAME
+    
+    total_hours = 0
+    shift_count = 0
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute('''
+            SELECT duration_hours 
+            FROM Shifts 
+            WHERE user_id = ? 
+            AND shift_date >= ? 
+            AND end_time IS NOT NULL
+        ''', (user_id, month_start)) as cursor:
+            async for row in cursor:
+                shift_count += 1
+                total_hours += (row[0] or 0)
+
+    msg = (
+        f"📊 <b>İstatistiklerim ({now.strftime('%B')})</b>\n\n"
+        f"✅ Tamamlanan Şift: <b>{shift_count}</b>\n"
+        f"⏱ Toplam Saat: <b>{round(total_hours, 1)}</b>\n\n"
+        f"<i>Detaylı bilgi için yöneticiye başvurunuz.</i>"
+    )
+    
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=main_menu)
+    return "main_menu"

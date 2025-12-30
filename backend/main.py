@@ -8,6 +8,8 @@ from jose import jwt
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import hashlib
+import httpx
+import pytz
 
 # ИМПОРТЫ МОДУЛЕЙ
 from .database import get_db, DB_NAME
@@ -16,9 +18,11 @@ from .reports import router as reports_router
 from .schedules import router as schedules_router # Новый роутер
 
 load_dotenv()
+istanbul_tz = pytz.timezone("Europe/Istanbul")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "5Tg$8asD7v^9pQLz)3M2nX!0cB#jRh+V")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Получаем токен бота из .env
 
 app = FastAPI(title="Shift Manager API v6.2 (Fully Modular)")
 
@@ -207,6 +211,96 @@ async def get_shifts():
     async with await get_db() as db:
         cursor = await db.execute("SELECT s.*, u.name as user_name, u.role FROM Shifts s LEFT JOIN Users u ON s.user_id = u.id ORDER BY s.start_time DESC")
         return [dict(row) for row in await cursor.fetchall()]
+    
+@app.post("/shifts/{shift_id}/finish")
+async def finish_shift_force(shift_id: int):
+    """
+    Принудительное завершение смены администратором.
+    Использует Стамбульское время и отправляет правильные кнопки.
+    """
+    async with await get_db() as db:
+        # 1. Получаем смену и данные пользователя
+        cursor = await db.execute('''
+            SELECT s.*, u.telegram_id, u.role, u.name 
+            FROM Shifts s 
+            JOIN Users u ON s.user_id = u.id 
+            WHERE s.id = ?
+        ''', (shift_id,))
+        shift = await cursor.fetchone()
+        
+        if not shift:
+            raise HTTPException(status_code=404, detail="Смена не найдена")
+        if shift['end_time']:
+            raise HTTPException(status_code=400, detail="Смена уже завершена")
+
+        # 2. Получаем текущее время в Стамбуле
+        end_time_aware = datetime.now(istanbul_tz)
+        
+        # 3. Расчет длительности
+        try:
+            # start_time в БД обычно строка "YYYY-MM-DD HH:MM:SS"
+            start_time_str = shift['start_time'].replace('T', ' ').split('.')[0]
+            start_dt_naive = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+            
+            # Приводим end_time к naive (без tzinfo) для арифметики, так как start_dt naive
+            end_dt_naive = end_time_aware.replace(tzinfo=None)
+
+            duration = (end_dt_naive - start_dt_naive).total_seconds() / 3600
+            duration_hours = max(0.01, round(duration, 2))
+        except Exception as e:
+            print(f"Error calculating duration: {e}")
+            end_dt_naive = end_time_aware.replace(tzinfo=None)
+            duration_hours = 0.0
+
+        # 4. Обновляем запись в БД
+        end_time_str = end_dt_naive.strftime("%Y-%m-%d %H:%M:%S")
+        
+        await db.execute('''
+            UPDATE Shifts 
+            SET end_time = ?, duration_hours = ?
+            WHERE id = ?
+        ''', (end_time_str, duration_hours, shift_id))
+        
+        await db.commit()
+
+        # 5. Отправляем уведомление с НОВЫМИ КНОПКАМИ
+        if shift['telegram_id'] and BOT_TOKEN:
+            try:
+                # КЛАВИАТУРА: Раздельные кнопки локаций + Статистика
+                keyboard = [
+                    [{"text": "Yenibosna'da Şift Başlat"}, {"text": "Göktürk'te Şift Başlat"}],
+                    [{"text": "İstatistiklerim"}]
+                ]
+                
+                # Кнопка админки
+                if shift['role'] in ['admin', 'owner']:
+                    keyboard.append([{"text": "Yönetici Paneli"}])
+
+                payload = {
+                    "chat_id": shift['telegram_id'],
+                    "text": (
+                        f"⚠️ <b>Vardiyanız yönetici tarafından sonlandırıldı.</b>\n\n"
+                        f"🏁 Bitiş: {end_time_aware.strftime('%H:%M')}\n"
+                        f"⏱ Süre: {duration_hours} saat"
+                    ),
+                    "parse_mode": "HTML",
+                    "reply_markup": {
+                        "keyboard": keyboard,
+                        "resize_keyboard": True,
+                        "one_time_keyboard": False
+                    }
+                }
+
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                        json=payload,
+                        timeout=5.0
+                    )
+            except Exception as e:
+                print(f"Telegram notification error: {e}")
+                
+        return {"status": "success", "message": "Смена завершена"}
 
 
 

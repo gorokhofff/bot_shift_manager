@@ -47,6 +47,15 @@ export const translations = {
     sched_working: "Рабочий",
     sched_day_off: "Выходной",
     
+    // Новые кнопки и настройки
+    sched_btn_show_all: "Показать всех",
+    sched_btn_show_active_loc: "Только работавшие здесь",
+    sched_btn_settings: "Настройки времени",
+    sched_settings_title: "Стандартное время работы для",
+    sched_save_settings: "Сохранить настройки",
+    sched_msg_settings_saved: "Настройки времени сохранены",
+    sched_msg_save_error: "Ошибка сохранения",
+    
     // Shift Summary
     summ_title: "Сводка по сменам",
     summ_name: "Имя",
@@ -162,13 +171,39 @@ export const translations = {
     rep_filter_no_sales: "Нет продаж (0)",
     rep_doubles_found: "Найдено дубликатов",
 
-    dash_status_extra: "Вне плана",
-    dash_status_missing: "Не вышел",
-    dash_btn_finish: "Завершить",
-    dash_confirm_finish: "Вы уверены, что хотите принудительно завершить смену для",
-    dash_plan_time: "По плану:"
+    // Dashboard Statuses & Actions (NEW)
+    status_working: "Работает",
+    status_missing: "По плану, но не здесь",
+    status_extra: "Работает в выходной",
+    status_offline: "OFFLINE",
+    btn_stop: "Стоп",
+    confirm_finish: "Завершить смену сотрудника {name} сейчас?",
+    online_suffix: "online",
 
+    dash_title: "Дашборд",
+    dash_loc_yenibosna: "Yenibosna",
+    dash_loc_gokturk: "Göktürk",
+    dash_no_active: "Нет активных смен",
+    
+    // Новые статусы
+    status_missing: "По плану, но не здесь",
+    status_extra: "Работает в выходной",
+    status_offline: "OFFLINE",
+    
+    // Действия
+    btn_stop: "Завершить",
+    confirm_finish: "Завершить смену сотрудника {name} сейчас?",
+    online_suffix: "online",
+    show_missing: "Показать отсутствующих ({count})",
+    hide_missing: "Скрыть отсутствующих",
 
+    // Pagination & Table actions
+    rows_per_page: "Строк на странице:",
+    page_of: "из",
+    btn_edit_row: "Правка",
+    btn_save_row: "ОК",
+    btn_cancel_row: "Отм.",
+    filter_reset: "Сбросить фильтры"
   },
 
   tr: {
@@ -218,6 +253,15 @@ export const translations = {
     sched_legend: "Lejant",
     sched_working: "Çalışıyor",
     sched_day_off: "İzinli",
+
+    // Новые кнопки и настройки
+    sched_btn_show_all: "Tümünü Göster",
+    sched_btn_show_active_loc: "Burada Çalışanlar",
+    sched_btn_settings: "Saat Ayarları",
+    sched_settings_title: "Standart Çalışma Saatleri:",
+    sched_save_settings: "Ayarları Kaydet",
+    sched_msg_settings_saved: "Saat ayarları kaydedildi",
+    sched_msg_save_error: "Kayıt hatası",
     
     // Shift Summary
     summ_title: "Vardiya Özeti",
@@ -326,16 +370,43 @@ export const translations = {
     dash_loc_yenibosna: "Yenibosna",
     dash_loc_gokturk: "Göktürk",
 
+    // Dashboard Statuses & Actions (NEW)
+    status_working: "Çalışıyor",
+    status_missing: "Gelmedi", // Или "Gelmedi" (Не пришел)
+    status_extra: "İzin gününde çalışıyor",
+    status_offline: "ÇEVRİMDIŞI",
+    btn_stop: "Bitir", // "Stop" или "Durdur"
+    confirm_finish: "{name} adlı personelin vardiyasını şimdi bitirmek istiyor musunuz?",
+    online_suffix: "çevrimiçi",
+    dash_title: "Panel",
+    dash_loc_yenibosna: "Yenibosna",
+    dash_loc_gokturk: "Göktürk",
+    dash_no_active: "Aktif vardiya yok",
+    
+    // Новые статусы
+    status_missing: "Planlı fakat yok",
+    status_extra: "İzin gününde çalışıyor",
+    status_offline: "ÇEVRİMDIŞI",
+    
+    // Действия
+    btn_stop: "Bitir",
+    confirm_finish: "{name} adlı personelin vardiyasını şimdi bitirmek istiyor musunuz?",
+    online_suffix: "çevrimiçi",
+    show_missing: "Gelmayanları göster ({count})",
+    hide_missing: "Gizle",
+
     // Reports Page Filters
     rep_filter_all: "Tüm Raporlar",
     rep_filter_doubles: "Çift Raporlar",
     rep_filter_no_sales: "Satış Yok (0)",
     rep_doubles_found: "Çift kayıt bulundu",
 
-    dash_status_extra: "Ekstra Mesai",
-    dash_status_missing: "Gelmedi",
-    dash_btn_finish: "Bitir",
-    dash_confirm_finish: "Vardiyayı zorla bitirmek istediğinize emin misiniz:",
-    dash_plan_time: "Planlanan:"
+    // Pagination & Table actions
+    rows_per_page: "Sayfa başına satır:",
+    page_of: "/",
+    btn_edit_row: "Düzenle",
+    btn_save_row: "Tamam",
+    btn_cancel_row: "İptal",
+    filter_reset: "Filtreleri Temizle"
   }
 };

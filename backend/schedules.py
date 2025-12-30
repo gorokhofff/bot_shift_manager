@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
+from datetime import datetime, timedelta
 from .database import get_db
 
 router = APIRouter()
@@ -29,6 +30,20 @@ class ScheduleDayUpdate(BaseModel):
     is_workday: bool
     notes: Optional[str] = ""
 
+class LocationSettingModel(BaseModel):
+    location: str
+    default_start_time: str
+    default_end_time: str
+
+class RoleScheduleSetting(BaseModel):
+    location: str
+    role: str
+    default_start_time: str
+    default_end_time: str
+
+class RoleSettingsUpdate(BaseModel):
+    settings: List[RoleScheduleSetting]
+
 # --- НОВЫЕ ЭНДПОИНТЫ (для EmployeeSchedules.jsx и ShiftSummary.jsx) ---
 
 @router.get("/locations")
@@ -37,6 +52,79 @@ async def get_locations():
     async with await get_db() as db:
         cursor = await db.execute("SELECT DISTINCT location FROM Shifts WHERE location IS NOT NULL AND location != ''")
         return [row['location'] for row in await cursor.fetchall()]
+    
+@router.get("/dashboard/daily-status")
+async def get_daily_status():
+    """
+    Возвращает сводку на сегодня: Active + Scheduled Missing
+    """
+    today = datetime.now()
+    # Получаем расписание на сегодня
+    async with await get_db() as db:
+        # 1. Активные сотрудники
+        users_cursor = await db.execute("SELECT id, name, role FROM Users WHERE status = 'active'")
+        users = {u['id']: dict(u) for u in await users_cursor.fetchall()}
+
+        # 2. План на сегодня
+        schedule_cursor = await db.execute('''
+            SELECT user_id, is_workday 
+            FROM employee_schedules 
+            WHERE year = ? AND month = ? AND day = ?
+        ''', (today.year, today.month, today.day))
+        
+        scheduled_ids = {row['user_id'] for row in await schedule_cursor.fetchall() if row['is_workday']}
+
+        # 3. Активные смены (кто сейчас работает)
+        shifts_cursor = await db.execute('''
+            SELECT s.*, u.name as user_name, u.role 
+            FROM Shifts s 
+            JOIN Users u ON s.user_id = u.id 
+            WHERE s.end_time IS NULL
+        ''')
+        active_shifts = [dict(row) for row in await shifts_cursor.fetchall()]
+        active_ids = {s['user_id'] for s in active_shifts}
+
+        # 4. Локации по умолчанию (для отсутствующих)
+        loc_cursor = await db.execute("SELECT user_id, location, COUNT(*) as c FROM Shifts GROUP BY user_id, location ORDER BY c DESC")
+        user_locs = {}
+        for row in await loc_cursor.fetchall():
+            if row['user_id'] not in user_locs: user_locs[row['user_id']] = row['location']
+
+        result = {"Yenibosna": [], "Göktürk": [], "Unknown": []}
+
+        # А. Добавляем тех, кто работает
+        for shift in active_shifts:
+            loc = shift['location'] if shift['location'] in result else "Unknown"
+            status = "working_extra" if shift['user_id'] not in scheduled_ids else "working"
+            
+            result[loc].append({
+                "user_id": shift['user_id'],
+                "name": shift['user_name'],
+                "role": shift['role'],
+                "status": status,
+                "shift": shift
+            })
+
+        # Б. Добавляем "прогульщиков"
+        for uid in scheduled_ids:
+            if uid not in active_ids and uid in users:
+                user = users[uid]
+                loc = user_locs.get(uid, "Yenibosna")
+                if loc not in result: loc = "Unknown"
+                
+                result[loc].append({
+                    "user_id": uid,
+                    "name": user['name'],
+                    "role": user['role'],
+                    "status": "missing",
+                    "shift": None
+                })
+        
+        # Сортировка: Сначала работающие
+        for k in result:
+            result[k].sort(key=lambda x: (x['status'] == 'missing', x['name']))
+            
+        return result
 
 @router.get("/users-by-location/{location}")
 async def get_users_by_location(location: str):
@@ -180,3 +268,84 @@ async def copy_previous_month_schedule(data: CopyScheduleRequest):
         ''', (data.target_year, data.target_month, prev_year, prev_month))
         await db.commit()
         return {"status": "copied"}
+    
+@router.get("/settings/locations")
+async def get_location_settings():
+    """Получает настройки времени для всех локаций"""
+    async with await get_db() as db:
+        # Сначала убедимся, что все локации из Shifts есть в настройках
+        locs_cursor = await db.execute("SELECT DISTINCT location FROM Shifts WHERE location IS NOT NULL")
+        existing_locs = {row['location'] for row in await locs_cursor.fetchall()}
+        
+        for loc in existing_locs:
+            await db.execute(
+                "INSERT OR IGNORE INTO LocationSettings (location) VALUES (?)", 
+                (loc,)
+            )
+        await db.commit()
+
+        cursor = await db.execute("SELECT * FROM LocationSettings")
+        return [dict(row) for row in await cursor.fetchall()]
+
+@router.post("/settings/locations")
+async def update_location_settings(settings: LocationSettingModel):
+    """Обновляет время для конкретной локации"""
+    async with await get_db() as db:
+        await db.execute('''
+            INSERT INTO LocationSettings (location, default_start_time, default_end_time)
+            VALUES (?, ?, ?)
+            ON CONFLICT(location) DO UPDATE SET
+            default_start_time = excluded.default_start_time,
+            default_end_time = excluded.default_end_time
+        ''', (settings.location, settings.default_start_time, settings.default_end_time))
+        await db.commit()
+        return {"status": "success"}
+    
+
+# --- НОВЫЙ ЭНДПОИНТ: СОТРУДНИКИ ПО АКТИВНОСТИ ---
+@router.get("/users/by-location-activity")
+async def get_users_by_location_activity(location: str, days: int = 30):
+    """
+    Возвращает ID пользователей, которые работали в указанной локации 
+    за последние N дней.
+    """
+    async with await get_db() as db:
+        # Вычисляем дату отсечения
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        
+        cursor = await db.execute('''
+            SELECT DISTINCT user_id 
+            FROM Shifts 
+            WHERE location = ? 
+              AND shift_date >= ?
+        ''', (location, cutoff_date))
+        
+        user_ids = [row['user_id'] for row in await cursor.fetchall()]
+        return user_ids
+
+# --- НОВЫЕ ЭНДПОИНТЫ: НАСТРОЙКИ ВРЕМЕНИ ПО РОЛЯМ ---
+
+@router.get("/settings/role-schedules")
+async def get_role_schedules(location: str):
+    """Получает настройки времени для ролей в конкретной локации"""
+    async with await get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM LocationRoleSettings WHERE location = ?", 
+            (location,)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+@router.post("/settings/role-schedules")
+async def update_role_schedules(payload: RoleSettingsUpdate):
+    """Обновляет настройки времени для ролей"""
+    async with await get_db() as db:
+        for item in payload.settings:
+            await db.execute('''
+                INSERT INTO LocationRoleSettings (location, role, default_start_time, default_end_time)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(location, role) DO UPDATE SET
+                default_start_time = excluded.default_start_time,
+                default_end_time = excluded.default_end_time
+            ''', (item.location, item.role, item.default_start_time, item.default_end_time))
+        await db.commit()
+        return {"status": "success"}
