@@ -3,14 +3,15 @@ import Navbar from './Navbar';
 
 const Layout = () => {
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      {/* Навигация всегда сверху */}
+    <div className="min-h-screen bg-[#0F1115] text-white selection:bg-blue-500/30">
       <Navbar />
       
-      {/* Контент меняется здесь */}
-      <div className="container mx-auto p-4">
+      {/* Используем max-w-screen-2xl для больших экранов.
+         Padding увеличен для десктопа согласно гайдлайнам.
+      */}
+      <main className="container mx-auto px-4 py-6 md:px-8 md:py-8 lg:max-w-[1400px]">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 };

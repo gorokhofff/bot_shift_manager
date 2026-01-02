@@ -236,7 +236,7 @@ function WorkPlansManager() {
                 disabled={editMode}
                 className="p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-500 disabled:bg-gray-600"
               >
-                {[2023, 2024, 2025, 2026].map(year => (
+                {[2024, 2025, 2026, 2027, 2028].map(year => (
                   <option key={year} value={year}>{year}</option>
                 ))}
               </select>

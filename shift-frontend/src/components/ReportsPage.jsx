@@ -95,26 +95,20 @@ Değiştirme - ${parsed["Değiştirme"] || ""}
 // --- КОМПОНЕНТ ЯЧЕЙКИ (Построчное редактирование) ---
 const EditableCell = ({ value: initialValue, row, column, updateData, isEditing }) => {
   const [value, setValue] = useState(initialValue);
-
-  // Синхронизация при изменении initialValue или режима редактирования
-  useEffect(() => {
-    setValue(initialValue);
-  }, [initialValue, isEditing]);
+  useEffect(() => { setValue(initialValue); }, [initialValue, isEditing]);
 
   const onChange = e => {
     setValue(e.target.value);
     updateData(row.index, column.id, e.target.value);
   };
 
-  if (!isEditing) {
-    return <span>{value || "—"}</span>;
-  }
+  if (!isEditing) return <span className="block py-2">{value || "—"}</span>;
 
   return (
     <input
       value={value || ""}
       onChange={onChange}
-      className="bg-gray-800 text-white p-1 w-full text-xs border border-blue-500 rounded focus:outline-none"
+      className="w-full h-10 px-2 bg-gray-900 border border-blue-500 rounded text-sm text-white focus:outline-none"
     />
   );
 };
@@ -400,12 +394,15 @@ function ReportsPage() {
   const StatCard = ({ title, value, onClick, isActive, color }) => (
       <button 
           onClick={onClick}
-          className={`p-3 rounded border flex flex-col items-center justify-center min-w-[100px] transition-all
-              ${isActive ? `bg-${color}-900/40 border-${color}-500 ring-1 ring-${color}-400` : 'bg-gray-800 border-gray-700 hover:bg-gray-750'}
+          className={`h-20 px-4 rounded-xl border flex flex-col items-center justify-center min-w-[110px] transition-all
+              ${isActive 
+                ? `bg-${color}-900/20 border-${color}-500 ring-1 ring-${color}-500` 
+                : 'bg-gray-800 border-gray-700 hover:bg-gray-750'
+              }
           `}
       >
-          <span className={`text-xl font-bold text-${color}-400`}>{value}</span>
-          <span className="text-[10px] uppercase text-gray-500 font-bold">{title}</span>
+          <span className={`text-2xl font-light text-${color === 'white' ? 'gray-200' : color + '-400'}`}>{value}</span>
+          <span className="text-[10px] uppercase text-gray-500 font-bold tracking-wider mt-1">{title}</span>
       </button>
   );
 

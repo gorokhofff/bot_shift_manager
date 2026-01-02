@@ -9,30 +9,41 @@ function Users() {
   }, []);
 
   return (
-    <div className="p-8 bg-gray-900 text-white min-h-screen">
-      <h1 className="text-2xl mb-6">Kullanıcılar</h1>
-      <table className="w-full bg-gray-800 rounded">
-        <thead>
-          <tr>
-            <th className="p-2">ID</th>
-            <th className="p-2">İsim</th>
-            <th className="p-2">Telegram ID</th>
-            <th className="p-2">Durum</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u.id}>
-              <td className="p-2">{u.id}</td>
-              <td className="p-2">{u.name}</td>
-              <td className="p-2">{u.telegram_id}</td>
-              <td className="p-2">{u.status}</td>
+    <div className="max-w-4xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold text-white tracking-tight">Users</h1>
+      <div className="card-surface overflow-hidden">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-gray-800 border-b border-gray-700 text-gray-400 text-xs uppercase">
+              <th className="p-4 font-bold tracking-wider">Name</th>
+              <th className="p-4 font-bold tracking-wider hidden sm:table-cell">Telegram ID</th>
+              <th className="p-4 font-bold tracking-wider">Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-gray-700">
+            {users.map(u => (
+              <tr key={u.id} className="hover:bg-gray-700/30 transition-colors h-16">
+                <td className="p-4">
+                  <div className="font-medium text-white text-base">{u.name}</div>
+                  <div className="text-xs text-gray-500 sm:hidden mt-1">ID: {u.telegram_id}</div>
+                </td>
+                <td className="p-4 text-gray-300 font-mono text-sm hidden sm:table-cell">
+                  {u.telegram_id}
+                </td>
+                <td className="p-4">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+                    u.status === 'active' ? 'bg-green-900/30 text-green-400' : 'bg-gray-700 text-gray-400'
+                  }`}>
+                    {u.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-export default Users; // <-- ОБЯЗАТЕЛЬНО
+export default Users;

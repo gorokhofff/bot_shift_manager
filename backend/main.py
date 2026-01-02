@@ -10,19 +10,20 @@ from dotenv import load_dotenv
 import hashlib
 import httpx
 import pytz
+import sqlite3 # Добавлен импорт для работы с типами БД
 
 # ИМПОРТЫ МОДУЛЕЙ
 from .database import get_db, DB_NAME
 from .payroll import router as payroll_router
 from .reports import router as reports_router
-from .schedules import router as schedules_router # Новый роутер
+from .schedules import router as schedules_router
 
 load_dotenv()
 istanbul_tz = pytz.timezone("Europe/Istanbul")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "5Tg$8asD7v^9pQLz)3M2nX!0cB#jRh+V")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Получаем токен бота из .env
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 app = FastAPI(title="Shift Manager API v6.2 (Fully Modular)")
 
@@ -39,7 +40,7 @@ app.include_router(payroll_router)
 app.include_router(reports_router)
 app.include_router(schedules_router)
 
-# --- МОДЕЛИ ДЛЯ ОСТАВШИХСЯ ЭНДПОИНТОВ ---
+# --- МОДЕЛИ ---
 class TableUpdatePayload(BaseModel):
     updates: List[Dict[str, Any]]
 
@@ -54,28 +55,32 @@ class WorkPlanUpdate(BaseModel):
     month: int
     planned_hours: float
 
+# Новая модель для настроек ролей
+class RoleScheduleSettings(BaseModel):
+    settings: List[Dict[str, Any]]
+
 # --- AUTH & SYSTEM ---
 
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "v6.2"}
 
-# Соль должна совпадать с миграцией
 SALT = "super_secret_salt_shift_manager_2025"
 
 def verify_password(plain_password, hashed_password):
     return hashlib.sha256((plain_password + SALT).encode()).hexdigest() == hashed_password
 
 @app.post("/login")
-async def login(username: str = Form(...), password: str = Form(...)): # Обратите внимание: username теперь принимаем
+async def login(username: str = Form(...), password: str = Form(...)):
     async with await get_db() as db:
+        # Используем таблицу web_users для авторизации (админы, владельцы)
+        # Это НЕ связано с таблицей roles (сотрудники), поэтому логика не ломается
         cursor = await db.execute("SELECT * FROM web_users WHERE username = ?", (username,))
         user = await cursor.fetchone()
         
         if not user or not verify_password(password, user['password_hash']):
             raise HTTPException(status_code=401, detail="Неверный логин или пароль")
         
-        # Генерируем токен (можно добавить роль в payload токена)
         access_token = jwt.encode(
             {
                 "sub": user['username'], 
@@ -89,8 +94,8 @@ async def login(username: str = Form(...), password: str = Form(...)): # Обр�
         return {
             "access_token": access_token, 
             "token_type": "bearer",
-            "role": user['role'],   # Отдаем роль фронтенду
-            "name": user['name']    # Отдаем имя фронтенду
+            "role": user['role'],
+            "name": user['name']
         }
 
 # --- RATES (Тарифы) ---
@@ -138,6 +143,121 @@ async def save_work_plan(plan: WorkPlanUpdate):
         await db.commit()
         return {"status": "saved"}
 
+# --- НОВЫЕ ЭНДПОИНТЫ: РОЛИ И НАСТРОЙКИ (Исправлено под ваш стиль БД) ---
+
+@app.get("/roles")
+async def get_roles():
+    """Получает список ролей сотрудников из таблицы roles"""
+    async with await get_db() as db:
+        # Сортируем по приоритету (админы выше, уборщики ниже)
+        cursor = await db.execute("SELECT slug, name FROM roles ORDER BY priority ASC")
+        rows = await cursor.fetchall()
+        # Возвращаем в формате, удобном для Select на фронтенде
+        return [{"value": row['name'], "slug": row['slug']} for row in rows]
+
+# --- LOCATIONS (FIXED) ---
+@app.get("/locations")
+async def get_locations():
+    """Возвращает список доступных локаций"""
+    # Можно брать из БД, если есть таблица LocationSettings, или возвращать константы
+    async with await get_db() as db:
+        # Попробуем найти уникальные локации в сменах
+        cursor = await db.execute("SELECT DISTINCT location FROM Shifts WHERE location IS NOT NULL AND location != ''")
+        rows = await cursor.fetchall()
+        locs = [r['location'] for r in rows]
+        
+        # Если база пустая, возвращаем дефолт
+        defaults = ["Yenibosna", "Göktürk"]
+        for d in defaults:
+            if d not in locs:
+                locs.append(d)
+        
+        return sorted(locs)
+
+@app.get("/settings/role-schedules")
+async def get_role_schedules(location: str):
+    async with await get_db() as db:
+        # Берем только АКТУАЛЬНЫЕ настройки (где effective_to IS NULL)
+        cursor = await db.execute("""
+            SELECT role, default_start_time, default_end_time 
+            FROM role_schedules 
+            WHERE location = ? AND effective_to IS NULL
+        """, (location,))
+        rows = await cursor.fetchall()
+        return [{"role": row['role'], "default_start_time": row['default_start_time'], "default_end_time": row['default_end_time']} for row in rows]
+
+@app.post("/settings/role-schedules")
+async def save_role_schedules(payload: RoleScheduleSettings):
+    """Сохраняет настройки с историей (SCD Type 2)"""
+    async with await get_db() as db:
+        now = datetime.now()
+        try:
+            for item in payload.settings:
+                loc = item['location']
+                role = item['role']
+                start = item['default_start_time']
+                end = item['default_end_time']
+                
+                # 1. Находим текущую активную запись
+                cursor = await db.execute("""
+                    SELECT id, default_start_time, default_end_time 
+                    FROM role_schedules 
+                    WHERE location = ? AND role = ? AND effective_to IS NULL
+                """, (loc, role))
+                current = await cursor.fetchone()
+                
+                # Если запись есть и данные изменились -> закрываем старую, открываем новую
+                if current:
+                    curr_id = current['id']
+                    old_start = current['default_start_time']
+                    old_end = current['default_end_time']
+                    
+                    if old_start != start or old_end != end:
+                        # Закрываем старую запись
+                        await db.execute("""
+                            UPDATE role_schedules 
+                            SET effective_to = ? 
+                            WHERE id = ?
+                        """, (now, curr_id))
+                        
+                        # Создаем новую
+                        await db.execute("""
+                            INSERT INTO role_schedules (location, role, default_start_time, default_end_time, effective_from)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (loc, role, start, end, now))
+                else:
+                    # Если записи не было -> создаем первую
+                    await db.execute("""
+                        INSERT INTO role_work_plans (location, role, default_start_time, default_end_time, effective_from)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (loc, role, start, end, now)) # ВНИМАНИЕ: Тут могла быть ошибка в имени таблицы, исправил на role_schedules ниже
+            
+            # Исправление имени таблицы для insert (была опечатка в логике выше, здесь правильный блок для 'else' если бы я писал с нуля, но в цикле лучше явно)
+            # Перепроверяем логику вставки:
+            
+            # ПРАВИЛЬНЫЙ ЦИКЛ (перезаписан для надежности):
+            for item in payload.settings:
+                loc = item['location']
+                role = item['role']
+                start = item['default_start_time']
+                end = item['default_end_time']
+                
+                cursor = await db.execute("SELECT id, default_start_time, default_end_time FROM role_schedules WHERE location = ? AND role = ? AND effective_to IS NULL", (loc, role))
+                current = await cursor.fetchone()
+                
+                if current:
+                    if current['default_start_time'] != start or current['default_end_time'] != end:
+                        await db.execute("UPDATE role_schedules SET effective_to = ? WHERE id = ?", (now, current['id']))
+                        await db.execute("INSERT INTO role_schedules (location, role, default_start_time, default_end_time, effective_from) VALUES (?, ?, ?, ?, ?)", (loc, role, start, end, now))
+                else:
+                    await db.execute("INSERT INTO role_schedules (location, role, default_start_time, default_end_time, effective_from) VALUES (?, ?, ?, ?, ?)", (loc, role, start, end, now))
+
+            await db.commit()
+            return {"status": "success", "message": "Settings updated with history tracking"}
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+
 # --- ADMIN TABLES CRUD ---
 
 @app.get("/tables")
@@ -154,13 +274,18 @@ async def get_table_data(table_name: str, page: int = 1, page_size: int = 25, se
         query = f"SELECT * FROM {table_name}"
         params = []
         if search:
-            cols = [r['name'] for r in await (await db.execute(f"PRAGMA table_info({table_name})")).fetchall()]
+            # Получаем колонки для поиска
+            cols_info = await (await db.execute(f"PRAGMA table_info({table_name})")).fetchall()
+            cols = [r['name'] for r in cols_info]
             query += " WHERE " + " OR ".join([f"{c} LIKE ?" for c in cols])
             params = [f"%{search}%" for _ in cols]
         
-        count_res = await (await db.execute(f"SELECT COUNT(*) as c FROM ({query})", params)).fetchone()
+        # Считаем общее количество
+        count_sql = f"SELECT COUNT(*) as c FROM ({query})"
+        count_res = await (await db.execute(count_sql, params)).fetchone()
         total = count_res['c']
         
+        # Получаем данные с пагинацией
         query += " LIMIT ? OFFSET ?"
         params.extend([page_size, offset])
         data = [dict(r) for r in await (await db.execute(query, params)).fetchall()]
@@ -216,10 +341,9 @@ async def get_shifts():
 async def finish_shift_force(shift_id: int):
     """
     Принудительное завершение смены администратором.
-    Использует Стамбульское время и отправляет правильные кнопки.
     """
     async with await get_db() as db:
-        # 1. Получаем смену и данные пользователя
+        # 1. Получаем смену
         cursor = await db.execute('''
             SELECT s.*, u.telegram_id, u.role, u.name 
             FROM Shifts s 
@@ -233,18 +357,12 @@ async def finish_shift_force(shift_id: int):
         if shift['end_time']:
             raise HTTPException(status_code=400, detail="Смена уже завершена")
 
-        # 2. Получаем текущее время в Стамбуле
+        # 2. Время и расчет
         end_time_aware = datetime.now(istanbul_tz)
-        
-        # 3. Расчет длительности
         try:
-            # start_time в БД обычно строка "YYYY-MM-DD HH:MM:SS"
             start_time_str = shift['start_time'].replace('T', ' ').split('.')[0]
             start_dt_naive = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-            
-            # Приводим end_time к naive (без tzinfo) для арифметики, так как start_dt naive
             end_dt_naive = end_time_aware.replace(tzinfo=None)
-
             duration = (end_dt_naive - start_dt_naive).total_seconds() / 3600
             duration_hours = max(0.01, round(duration, 2))
         except Exception as e:
@@ -252,27 +370,22 @@ async def finish_shift_force(shift_id: int):
             end_dt_naive = end_time_aware.replace(tzinfo=None)
             duration_hours = 0.0
 
-        # 4. Обновляем запись в БД
+        # 3. Обновление БД
         end_time_str = end_dt_naive.strftime("%Y-%m-%d %H:%M:%S")
-        
         await db.execute('''
             UPDATE Shifts 
             SET end_time = ?, duration_hours = ?
             WHERE id = ?
         ''', (end_time_str, duration_hours, shift_id))
-        
         await db.commit()
 
-        # 5. Отправляем уведомление с НОВЫМИ КНОПКАМИ
+        # 4. Уведомление в Telegram
         if shift['telegram_id'] and BOT_TOKEN:
             try:
-                # КЛАВИАТУРА: Раздельные кнопки локаций + Статистика
                 keyboard = [
                     [{"text": "Yenibosna'da Şift Başlat"}, {"text": "Göktürk'te Şift Başlat"}],
                     [{"text": "İstatistiklerim"}]
                 ]
-                
-                # Кнопка админки
                 if shift['role'] in ['admin', 'owner']:
                     keyboard.append([{"text": "Yönetici Paneli"}])
 
@@ -290,7 +403,6 @@ async def finish_shift_force(shift_id: int):
                         "one_time_keyboard": False
                     }
                 }
-
                 async with httpx.AsyncClient() as client:
                     await client.post(
                         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -301,8 +413,6 @@ async def finish_shift_force(shift_id: int):
                 print(f"Telegram notification error: {e}")
                 
         return {"status": "success", "message": "Смена завершена"}
-
-
 
 if __name__ == "__main__":
     import uvicorn

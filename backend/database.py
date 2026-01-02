@@ -4,8 +4,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_NAME = os.getenv("DATABASE_URL", os.path.join(BASE_DIR, "data", "shift_manager.db"))
+# 1. Получаем абсолютный путь к папке, где лежит этот скрипт (backend/)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Поднимаемся на уровень выше в корень проекта
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+
+# 3. Жестко задаем путь к БД в папке data в КОРНЕ проекта.
+# Мы НЕ используем os.getenv("DATABASE_URL"), чтобы избежать ошибки с точкой (.)
+DB_NAME = os.path.join(PROJECT_ROOT, "data", "shift_manager.db")
+
+print(f"✅ DATABASE CONNECTED TO: {DB_NAME}")
 
 class DbSession:
     def __init__(self, db_path):
@@ -16,7 +25,6 @@ class DbSession:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.db = await aiosqlite.connect(self.db_path, timeout=30.0)
         await self.db.execute("PRAGMA journal_mode=WAL")
-        await self.db.execute("PRAGMA busy_timeout=10000")
         self.db.row_factory = aiosqlite.Row
         return self.db
 

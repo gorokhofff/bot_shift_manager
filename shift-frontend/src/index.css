@@ -2,28 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tailwind custom components (добавляется через @layer) */
+/* Tailwind custom components */
 @layer components {
+  /* Поля ввода согласно Material Design */
   .table-input {
-    @apply w-full px-3 py-1 rounded-md text-white shadow-sm transition-all duration-150 border
-           bg-gray-800 border-gray-600
-           focus:outline-none focus:ring-2 focus:ring-blue-500;
+    @apply w-full h-12 px-4 rounded-lg text-base text-white shadow-sm transition-all duration-200 border
+           bg-gray-800 border-gray-700
+           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
   }
 
   .table-input-edited {
-    @apply bg-yellow-900 border-yellow-500;
+    @apply bg-yellow-900/30 border-yellow-600 text-yellow-100;
+  }
+  
+  /* Карточки для дашборда - Surface 1 */
+  .card-surface {
+    @apply bg-gray-800 rounded-2xl shadow-lg border border-gray-700/50;
+  }
+  
+  /* Кнопки - минимум 44px/48px высоты */
+  .btn-primary {
+    @apply h-11 px-4 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-500 transition-colors flex items-center justify-center min-w-[44px];
+  }
+  
+  .btn-icon {
+    @apply h-11 w-11 rounded-lg flex items-center justify-center hover:bg-gray-700 transition-colors;
   }
 }
 
-/* Тёмная тема и базовая типографика */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Roboto', system-ui, -apple-system, sans-serif; /* Standard System Fonts */
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: dark;
-  background-color: #111827;
-  color: rgba(255, 255, 255, 0.87);
+  background-color: #0F1115; /* Более глубокий черный для фона (Surface 0) */
+  color: rgba(255, 255, 255, 0.87); /* High emphasis text */
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -31,43 +45,12 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #60a5fa;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #3b82f6;
-}
-
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #111827;
-  color: #ffffff;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #3b82f6;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+h1, h2, h3 {
+  letter-spacing: -0.02em; /* Tight spacing for headlines */
 }

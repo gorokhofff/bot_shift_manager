@@ -1,15 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import API from '../api';
 
-const ROLES = [
-  'кальянщик',
-  'старший кальянщик', 
-  'администратор',
-  'уборщик',
-  'студент',
-  'бармен/зал'
-];
-
+const ROLES = ['кальянщик', 'старший кальянщик', 'администратор', 'уборщик', 'студент', 'бармен/зал'];
 const PERIOD_TYPES = [
   { value: '1-15', label: '1-15 число' },
   { value: '16-end', label: '16-последний день' },
@@ -22,7 +14,6 @@ function RatesManager() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingRate, setEditingRate] = useState(null);
   
-  // Форма создания/редактирования
   const [formData, setFormData] = useState({
     role: '',
     rate: '',
@@ -30,432 +21,127 @@ function RatesManager() {
     effective_date: new Date().toISOString().split('T')[0]
   });
 
-  useEffect(() => {
-    loadRates();
-  }, []);
+  useEffect(() => { loadRates(); }, []);
 
   const loadRates = async () => {
     try {
       setLoading(true);
       const response = await API.get('/rates');
       setRates(response.data || []);
-    } catch (error) {
-      console.error('Ошибка загрузки тарифов:', error);
-      alert('Ошибка загрузки тарифов');
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { alert('Failed to load rates'); } finally { setLoading(false); }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!formData.role || !formData.rate || !formData.effective_date) {
-      alert('Заполните все поля');
-      return;
-    }
+    if (!formData.role || !formData.rate || !formData.effective_date) return alert('Fill all fields');
 
     try {
       if (editingRate) {
-        // Обновление существующего тарифа
-        await API.put(`/rates/${editingRate.id}`, {
-          rate: parseFloat(formData.rate),
-          effective_date: formData.effective_date
-        });
-        alert('✅ Тариф обновлен!');
+        await API.put(`/rates/${editingRate.id}`, { rate: parseFloat(formData.rate), effective_date: formData.effective_date });
       } else {
-        // Создание нового тарифа
-        await API.post('/rates', {
-          role: formData.role,
-          rate: parseFloat(formData.rate),
-          period_type: formData.period_type,
-          effective_date: formData.effective_date
-        });
-        alert('✅ Тариф создан!');
+        await API.post('/rates', { ...formData, rate: parseFloat(formData.rate) });
       }
-
-      // Сброс формы
-      setFormData({
-        role: '',
-        rate: '',
-        period_type: '1-15',
-        effective_date: new Date().toISOString().split('T')[0]
-      });
+      setFormData({ role: '', rate: '', period_type: '1-15', effective_date: new Date().toISOString().split('T')[0] });
       setShowCreateForm(false);
       setEditingRate(null);
-      
-      // Перезагрузка данных
       await loadRates();
-
-    } catch (error) {
-      console.error('Ошибка сохранения тарифа:', error);
-      alert(`❌ Ошибка сохранения: ${error.response?.data?.detail || error.message}`);
-    }
+    } catch (error) { alert(`Error: ${error.message}`); }
   };
 
-  const startEdit = (rate) => {
-    setEditingRate(rate);
-    setFormData({
-      role: rate.role,
-      rate: rate.rate.toString(),
-      period_type: rate.period_type,
-      effective_date: rate.effective_date
-    });
-    setShowCreateForm(true);
-  };
-
-  const cancelEdit = () => {
-    setEditingRate(null);
-    setFormData({
-      role: '',
-      rate: '',
-      period_type: '1-15',
-      effective_date: new Date().toISOString().split('T')[0]
-    });
-    setShowCreateForm(false);
-  };
-
-  const formatCurrency = (amount, periodType) => {
-    if (periodType === 'per_hookah') {
-      return `₺${amount}/кальян`;
-    }
-    return new Intl.NumberFormat('tr-TR', {
-      style: 'currency',
-      currency: 'TRY',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
-
-  const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('ru-RU');
-  };
-
-  const getPeriodLabel = (periodType) => {
-    const period = PERIOD_TYPES.find(p => p.value === periodType);
-    return period ? period.label : periodType;
-  };
-
-  // Группируем тарифы по ролям для отображения
   const groupedRates = rates.reduce((acc, rate) => {
-    if (!acc[rate.role]) {
-      acc[rate.role] = [];
-    }
+    if (!acc[rate.role]) acc[rate.role] = [];
     acc[rate.role].push(rate);
     return acc;
   }, {});
 
-  // Сортируем тарифы внутри каждой роли по дате (новые сверху)
-  Object.keys(groupedRates).forEach(role => {
-    groupedRates[role].sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-  });
-
   const getCurrentRate = (role, periodType) => {
     const roleRates = groupedRates[role] || [];
     const currentDate = new Date().toISOString().split('T')[0];
-    
-    const validRates = roleRates.filter(rate => 
-      rate.period_type === periodType && 
-      rate.effective_date <= currentDate
-    );
-    
-    return validRates.length > 0 ? validRates[0] : null;
+    const validRates = roleRates.filter(rate => rate.period_type === periodType && rate.effective_date <= currentDate);
+    validRates.sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+    return validRates[0] || null;
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">💰 Управление тарифами</h1>
-          
-          <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            {showCreateForm ? '❌ Отмена' : '➕ Добавить тариф'}
-          </button>
-        </div>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-white tracking-tight">Rate Management</h1>
+        <button onClick={() => setShowCreateForm(!showCreateForm)} className="btn-primary">
+          {showCreateForm ? 'Cancel' : 'Add New Rate'}
+        </button>
+      </div>
 
-        {/* Форма создания/редактирования */}
-        {showCreateForm && (
-          <div className="bg-gray-800 p-6 rounded-lg mb-6">
-            <h2 className="text-xl font-semibold mb-4">
-              {editingRate ? `Редактирование тарифа #${editingRate.id}` : 'Создание нового тарифа'}
-            </h2>
-            
-            <form onSubmit={handleSubmit}>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Роль</label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
-                    disabled={editingRate} // Роль нельзя менять при редактировании
-                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-400 disabled:bg-gray-600"
-                  >
-                    <option value="">Выберите роль</option>
-                    {ROLES.map(role => (
-                      <option key={role} value={role}>{role}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Тип периода</label>
-                  <select
-                    value={formData.period_type}
-                    onChange={(e) => setFormData({...formData, period_type: e.target.value})}
-                    disabled={editingRate} // Тип периода нельзя менять при редактировании
-                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-400 disabled:bg-gray-600"
-                  >
-                    {PERIOD_TYPES.map(period => (
-                      <option key={period.value} value={period.value}>{period.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Размер тарифа {formData.period_type === 'per_hookah' ? '(₽/кальян)' : '(₽)'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.rate}
-                    onChange={(e) => setFormData({...formData, rate: e.target.value})}
-                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-400"
-                    placeholder="Введите размер тарифа"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Дата начала действия</label>
-                  <input
-                    type="date"
-                    value={formData.effective_date}
-                    onChange={(e) => setFormData({...formData, effective_date: e.target.value})}
-                    className="w-full p-2 bg-gray-700 border border-gray-600 rounded focus:border-blue-400"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  type="submit"
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+      {showCreateForm && (
+        <div className="card-surface p-6 max-w-2xl mx-auto border border-blue-600/50">
+          <h2 className="text-xl font-bold mb-6">{editingRate ? `Edit Rate #${editingRate.id}` : 'New Rate Definition'}</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Role</label>
+                <select 
+                  className="table-input" 
+                  value={formData.role} 
+                  onChange={e => setFormData({...formData, role: e.target.value})}
+                  disabled={editingRate}
                 >
-                  {editingRate ? '💾 Обновить тариф' : '✅ Создать тариф'}
-                </button>
-                
-                <button
-                  type="button"
-                  onClick={cancelEdit}
-                  className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  ❌ Отмена
-                </button>
+                  <option value="">Select Role</option>
+                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
               </div>
-            </form>
-
-            {editingRate && (
-              <div className="mt-4 p-3 bg-yellow-900 border border-yellow-600 rounded">
-                <p className="text-yellow-200 text-sm">
-                  💡 <strong>Совет:</strong> При редактировании тарифа создается новая запись с новой датой. 
-                  Старые тарифы остаются для исторических данных.
-                </p>
+              <div>
+                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Period Type</label>
+                 <select 
+                    className="table-input" 
+                    value={formData.period_type} 
+                    onChange={e => setFormData({...formData, period_type: e.target.value})}
+                    disabled={editingRate}
+                 >
+                    {PERIOD_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                 </select>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Текущие действующие тарифы */}
-        <div className="bg-gray-800 rounded-lg mb-6">
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-xl font-semibold">📊 Текущие действующие тарифы</h2>
-            <p className="text-gray-300 text-sm">Тарифы, которые используются для расчета новых отчетов ФОТ</p>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-700">
-                <tr>
-                  <th className="p-3 text-left">Роль</th>
-                  <th className="p-3 text-center">1-15 число</th>
-                  <th className="p-3 text-center">16-последний день</th>
-                  <th className="p-3 text-center">За кальян</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ROLES.map(role => {
-                  const rate1_15 = getCurrentRate(role, '1-15');
-                  const rate16_end = getCurrentRate(role, '16-end');
-                  const ratePerHookah = getCurrentRate(role, 'per_hookah');
-
-                  return (
-                    <tr key={role} className="border-t border-gray-700 hover:bg-gray-750">
-                      <td className="p-3 font-medium">
-                        <span className="bg-gray-600 px-2 py-1 rounded text-sm">
-                          {role}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        {rate1_15 ? (
-                          <div>
-                            <span className="text-green-400 font-bold">
-                              {formatCurrency(rate1_15.rate, rate1_15.period_type)}
-                            </span>
-                            <p className="text-xs text-gray-400">
-                              с {formatDate(rate1_15.effective_date)}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500">—</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        {rate16_end ? (
-                          <div>
-                            <span className="text-green-400 font-bold">
-                              {formatCurrency(rate16_end.rate, rate16_end.period_type)}
-                            </span>
-                            <p className="text-xs text-gray-400">
-                              с {formatDate(rate16_end.effective_date)}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500">—</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        {ratePerHookah ? (
-                          <div>
-                            <span className="text-blue-400 font-bold">
-                              {formatCurrency(ratePerHookah.rate, ratePerHookah.period_type)}
-                            </span>
-                            <p className="text-xs text-gray-400">
-                              с {formatDate(ratePerHookah.effective_date)}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-gray-500">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* История всех тарифов */}
-        <div className="bg-gray-800 rounded-lg">
-          <div className="p-4 border-b border-gray-700">
-            <h2 className="text-xl font-semibold">📚 История всех тарифов</h2>
-            <p className="text-gray-300 text-sm">Все созданные тарифы с историей изменений</p>
-          </div>
-          
-          {loading ? (
-            <div className="p-8 text-center">
-              <p>🔄 Загрузка тарифов...</p>
-            </div>
-          ) : Object.keys(groupedRates).length === 0 ? (
-            <div className="p-8 text-center text-gray-400">
-              <p>📋 Тарифов пока нет</p>
-              <p className="text-sm mt-2">Создайте первый тариф</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-700">
-                  <tr>
-                    <th className="p-3 text-left">ID</th>
-                    <th className="p-3 text-left">Роль</th>
-                    <th className="p-3 text-center">Период</th>
-                    <th className="p-3 text-right">Размер</th>
-                    <th className="p-3 text-center">Действует с</th>
-                    <th className="p-3 text-center">Статус</th>
-                    <th className="p-3 text-center">Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(groupedRates).map(role => 
-                    groupedRates[role].map(rate => {
-                      const isActive = rate.effective_date <= new Date().toISOString().split('T')[0];
-                      const isCurrent = getCurrentRate(role, rate.period_type)?.id === rate.id;
-
-                      return (
-                        <tr key={rate.id} className="border-t border-gray-700 hover:bg-gray-750">
-                          <td className="p-3 font-mono text-sm">#{rate.id}</td>
-                          <td className="p-3">
-                            <span className="bg-gray-600 px-2 py-1 rounded text-sm">
-                              {rate.role}
-                            </span>
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className="bg-blue-900 px-2 py-1 rounded text-sm">
-                              {getPeriodLabel(rate.period_type)}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right font-bold">
-                            {formatCurrency(rate.rate, rate.period_type)}
-                          </td>
-                          <td className="p-3 text-center">
-                            {formatDate(rate.effective_date)}
-                          </td>
-                          <td className="p-3 text-center">
-                            {isCurrent ? (
-                              <span className="bg-green-600 px-2 py-1 rounded text-xs font-medium">
-                                ✅ Текущий
-                              </span>
-                            ) : isActive ? (
-                              <span className="bg-yellow-600 px-2 py-1 rounded text-xs font-medium">
-                                📊 Активный
-                              </span>
-                            ) : (
-                              <span className="bg-gray-600 px-2 py-1 rounded text-xs font-medium">
-                                ⏳ Будущий
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3 text-center">
-                            <button
-                              onClick={() => startEdit(rate)}
-                              className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition-colors"
-                            >
-                              ✏️ Редактировать
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Информационная панель */}
-        <div className="mt-6 bg-gradient-to-r from-blue-900 to-purple-900 p-6 rounded-lg border border-blue-700">
-          <div className="flex items-start space-x-4">
-            <div className="flex-shrink-0">
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                💡
+              <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Rate Value (TL)</label>
+                  <input type="number" step="0.01" className="table-input" value={formData.rate} onChange={e => setFormData({...formData, rate: e.target.value})} />
+              </div>
+              <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Effective Date</label>
+                  <input type="date" className="table-input" value={formData.effective_date} onChange={e => setFormData({...formData, effective_date: e.target.value})} />
               </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold mb-2">Как работают тарифы</h3>
-              <ul className="text-blue-100 space-y-1 text-sm">
-                <li>• <strong>Кальянщики:</strong> получают фиксированную сумму за каждый проданный кальян</li>
-                <li>• <strong>Остальные роли:</strong> получают фиксированную сумму за период (1-15 или 16-конец месяца)</li>
-                <li>• <strong>Дата начала действия:</strong> с какой даты тариф становится активным</li>
-                <li>• <strong>История:</strong> старые тарифы сохраняются для исторических отчетов</li>
-                <li>• <strong>Текущий тариф:</strong> самый новый активный тариф для каждой роли и периода</li>
-              </ul>
+            <div className="flex justify-end pt-4">
+               <button type="submit" className="h-11 px-6 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors">
+                  {editingRate ? 'Update Rate' : 'Create Rate'}
+               </button>
             </div>
-          </div>
+          </form>
         </div>
+      )}
+
+      {/* Current Rates Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+         {ROLES.map(role => (
+             <div key={role} className="card-surface p-5 hover:border-gray-500 transition-colors">
+                 <h3 className="text-lg font-bold text-white mb-4 border-b border-gray-700 pb-2">{role}</h3>
+                 <div className="space-y-3">
+                    {['1-15', '16-end', 'per_hookah'].map(pt => {
+                        const rate = getCurrentRate(role, pt);
+                        if (!rate) return null;
+                        return (
+                            <div key={pt} className="flex justify-between items-center bg-gray-900/50 p-3 rounded-lg">
+                                <span className="text-xs text-gray-400 font-medium uppercase">{PERIOD_TYPES.find(p => p.value === pt)?.label}</span>
+                                <div className="text-right">
+                                    <div className="text-lg font-bold text-green-400">{rate.rate} TL</div>
+                                    <div className="text-[10px] text-gray-500">since {rate.effective_date}</div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {!['1-15', '16-end', 'per_hookah'].some(pt => getCurrentRate(role, pt)) && (
+                        <div className="text-gray-500 text-sm italic">No active rates configured</div>
+                    )}
+                 </div>
+             </div>
+         ))}
       </div>
     </div>
   );

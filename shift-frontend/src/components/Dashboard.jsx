@@ -11,7 +11,6 @@ const Dashboard = () => {
   const [chartDate, setChartDate] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
   const [processing, setProcessing] = useState(null);
   
-  // Состояние для сворачивания/разворачивания отсутствующих
   const [expandedSection, setExpandedSection] = useState({ Yenibosna: false, Göktürk: false });
   
   const { t } = useLanguage();
@@ -76,66 +75,71 @@ const Dashboard = () => {
     return `${sign}${percent.toFixed(1)}%`;
   };
 
-  // --- КАРТОЧКА СОТРУДНИКА ---
+  // --- UI COMPONENTS ---
+
+  // Карточка сотрудника переработана для Touch Targets (мин 48px высота)
   const EmployeeCard = ({ item }) => {
     const { status, shift, name, role } = item;
     
-    let containerClass = "border-gray-700/50 bg-gray-700/20";
-    let nameColor = "text-gray-200";
-    let statusText = null;
+    // Используем более мягкие цвета для поверхностей вместо ярких рамок
+    let bgClass = "bg-gray-700/30 hover:bg-gray-700/50";
+    let nameColor = "text-gray-100";
+    let statusIndicator = null;
 
     if (status === 'missing') {
-        containerClass = "border-red-900/40 bg-red-900/10"; 
-        nameColor = "text-red-400"; 
-        statusText = t('status_missing');
+        bgClass = "bg-red-900/10 hover:bg-red-900/20 border-l-2 border-red-500"; 
+        nameColor = "text-red-200"; 
+        statusIndicator = <span className="text-xs text-red-400 font-medium ml-2">{t('status_missing')}</span>;
     } else if (status === 'working_extra') {
-        containerClass = "border-orange-900/40 bg-orange-900/10";
-        nameColor = "text-orange-300";
-        statusText = t('status_extra');
+        bgClass = "bg-orange-900/10 hover:bg-orange-900/20 border-l-2 border-orange-500";
+        nameColor = "text-orange-200";
+        statusIndicator = <span className="text-xs text-orange-400 font-medium ml-2">{t('status_extra')}</span>;
     }
 
     const duration = shift ? calculateDuration(shift.start_time) : null;
 
     return (
-        <div className={`flex items-center justify-between px-3 py-2 rounded border ${containerClass} mb-1 last:mb-0 transition-colors h-12`}>
-            {/* Имя, Роль, Статус */}
-            <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                <span className={`font-bold text-sm truncate shrink-0 ${nameColor}`}>
-                    {name}
-                </span>
-                <span className="text-[9px] text-gray-500 border border-gray-700 px-1 rounded uppercase tracking-wider shrink-0">
-                    {role}
-                </span>
-                {statusText && (
-                    <span className="text-[10px] text-red-400/60 italic truncate">
-                        {statusText}
+        <div className={`flex items-center justify-between px-4 py-3 rounded-xl mb-2 transition-all min-h-[56px] ${bgClass}`}>
+            {/* Информация о сотруднике */}
+            <div className="flex flex-col justify-center mr-3 min-w-0">
+                <div className="flex items-center">
+                    <span className={`text-base font-medium truncate ${nameColor}`}>
+                        {name}
                     </span>
-                )}
+                    {statusIndicator}
+                </div>
+                <div className="flex items-center mt-0.5">
+                     <span className="text-xs text-gray-400 uppercase tracking-wide">
+                        {role}
+                    </span>
+                </div>
             </div>
             
-            {/* Время и Кнопка */}
-            <div className="flex items-center gap-3 shrink-0 ml-2">
+            {/* Время и Действия */}
+            <div className="flex items-center gap-4 shrink-0">
                 {shift ? (
                     <>
-                        <div className="flex flex-col items-end justify-center min-w-[50px]">
-                            <div className="text-xs font-mono text-gray-300 leading-none mb-0.5">
+                        <div className="flex flex-col items-end hidden sm:flex">
+                            <span className="text-sm font-mono text-gray-300">
                                 {new Date(shift.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </div>
-                            <div className={`text-[10px] leading-none ${duration.isLong ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
+                            </span>
+                            <span className={`text-xs ${duration.isLong ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
                                 {duration.text}
-                            </div>
+                            </span>
                         </div>
                         
+                        {/* Кнопка STOP - увеличена область нажатия */}
                         <button 
                             onClick={() => handleFinishShift(shift.id, name)}
                             disabled={processing === shift.id}
-                            className="text-[10px] uppercase font-bold text-gray-500 border border-gray-600 hover:border-red-500/50 hover:text-red-400 hover:bg-gray-800 px-2 py-1.5 rounded transition-all disabled:opacity-30"
+                            className="h-10 px-4 rounded-lg bg-gray-700 border border-gray-600 text-gray-300 font-medium text-sm hover:bg-red-900/30 hover:text-red-200 hover:border-red-800 transition-all focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+                            aria-label={t('btn_stop')}
                         >
                             {processing === shift.id ? '...' : t('btn_stop')}
                         </button>
                     </>
                 ) : (
-                    <span className="text-[10px] font-bold text-gray-600 border border-gray-800 px-2 py-0.5 rounded">
+                    <span className="h-8 px-3 flex items-center justify-center rounded-md bg-gray-800 text-gray-500 text-xs font-bold border border-gray-700">
                         OFF
                     </span>
                 )}
@@ -144,56 +148,53 @@ const Dashboard = () => {
     );
   };
 
-  // --- КОМПОНЕНТ СПИСКА ЛОКАЦИИ ---
-  const LocationList = ({ locationName, titleKey, colorClass, headerClass }) => {
+  const LocationList = ({ locationName, titleKey, headerColor, accentColor }) => {
     const items = staffStatus[locationName] || [];
     const activeItems = items.filter(i => i.status !== 'missing');
     const missingItems = items.filter(i => i.status === 'missing');
     const isExpanded = expandedSection[locationName];
 
     return (
-        <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-lg flex flex-col max-h-[600px]">
-            {/* Header */}
-            <div className={`${headerClass} p-3 border-b flex justify-between items-center shrink-0 border-opacity-30`}>
+        <div className="card-surface flex flex-col h-full overflow-hidden">
+            {/* Заголовок карточки - Высота 64px для стандартов */}
+            <div className={`h-16 px-6 flex justify-between items-center border-b border-gray-700/50 ${headerColor}`}>
                 <div className="flex items-center gap-3">
-                    <h3 className={`font-bold tracking-wide ${colorClass}`}>{t(titleKey)}</h3>
+                    <h3 className={`text-lg font-semibold tracking-tight ${accentColor}`}>{t(titleKey)}</h3>
                     {missingItems.length > 0 && (
-                        <span className="text-xs font-bold bg-red-600/90 text-white px-2 py-0.5 rounded animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.5)] cursor-pointer" 
+                        <button 
+                              className="h-8 px-3 rounded-full bg-red-500/20 text-red-200 text-sm font-bold flex items-center justify-center hover:bg-red-500/30 transition-colors" 
                               onClick={() => toggleExpand(locationName)}
-                              title={t('show_missing').replace('{count}', missingItems.length)}>
-                            -{missingItems.length}
-                        </span>
+                              title={t('show_missing')}>
+                            {missingItems.length} Missing
+                        </button>
                     )}
                 </div>
-                <span className={`text-xs font-mono px-2 py-1 rounded-full border border-opacity-40 bg-opacity-30 ${colorClass.replace('text-', 'bg-').replace('400', '900')} text-gray-200 border-gray-600`}>
+                <span className="text-sm text-gray-400 font-medium">
                     {activeItems.length} {t('online_suffix')}
                 </span>
             </div>
 
-            {/* Active Items */}
-            <div className="p-2 overflow-y-auto">
+            <div className="p-4 overflow-y-auto max-h-[500px]">
                 {activeItems.length === 0 && missingItems.length === 0 ? (
-                    <p className="text-gray-500 text-sm text-center py-4">{t('dash_no_active')}</p>
+                    <div className="flex items-center justify-center h-32 text-gray-500">
+                        {t('dash_no_active')}
+                    </div>
                 ) : (
                     activeItems.map(item => <EmployeeCard key={item.user_id} item={item} />)
                 )}
 
-                {/* Missing Items Section (Spoiler) */}
+                {/* Секция отсутствующих */}
                 {missingItems.length > 0 && (
-                    <div className="mt-2 border-t border-gray-700 pt-2">
+                    <div className="mt-4 pt-2 border-t border-gray-700/50">
                         <button 
                             onClick={() => toggleExpand(locationName)}
-                            className="w-full text-center text-xs text-gray-500 hover:text-gray-300 py-1 mb-2 flex items-center justify-center gap-1 transition-colors"
+                            className="w-full h-12 flex items-center justify-center gap-2 text-gray-400 hover:text-white hover:bg-gray-700/30 rounded-lg transition-colors text-sm font-medium"
                         >
-                            {isExpanded ? (
-                                <span>▲ {t('hide_missing')}</span>
-                            ) : (
-                                <span>▼ {t('show_missing').replace('{count}', missingItems.length)}</span>
-                            )}
+                            {isExpanded ? '▲ ' + t('hide_missing') : '▼ ' + t('show_missing').replace('{count}', missingItems.length)}
                         </button>
                         
                         {isExpanded && (
-                            <div className="space-y-1 animate-fadeIn">
+                            <div className="mt-2 space-y-1 animate-fadeIn">
                                 {missingItems.map(item => <EmployeeCard key={item.user_id} item={item} />)}
                             </div>
                         )}
@@ -204,84 +205,132 @@ const Dashboard = () => {
     );
   };
 
-  if (loading) return <div className="p-8 text-white">{t('loading')}</div>;
+  const KPIWidget = ({ title, value, prevValue, trendUpGood = true }) => {
+    const percentage = getPercentageChange(value, prevValue);
+    const isPositive = parseFloat(percentage) >= 0;
+    // Определяем цвет: если рост это хорошо (trendUpGood), то зеленый, иначе красный.
+    const isGood = trendUpGood ? isPositive : !isPositive; 
+    
+    const trendColor = isGood ? 'text-green-400' : 'text-red-400';
+    const bgTrend = isGood ? 'bg-green-400/10' : 'bg-red-400/10';
+
+    return (
+        <div className="card-surface p-6 flex flex-col justify-between h-full relative overflow-hidden">
+            <div className="z-10">
+                <p className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">{title}</p>
+                <div className="flex items-baseline gap-2">
+                    <h4 className="text-4xl font-light text-white">{value}</h4>
+                    <span className="text-lg text-gray-500">шт</span>
+                </div>
+            </div>
+            
+            <div className={`mt-4 self-start px-3 py-1.5 rounded-lg flex items-center gap-2 ${bgTrend} ${trendColor}`}>
+                <span className="text-sm font-bold">{percentage}</span>
+                <span className="text-xs opacity-80 uppercase">{t('dash_vs_prev')}</span>
+            </div>
+        </div>
+    );
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-xl text-gray-400 font-light animate-pulse">{t('loading')}...</div>
+    </div>
+  );
 
   return (
-    <div className="p-3 md:p-6 text-white max-w-7xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold px-1">{t('dash_title')}</h1>
+    <div className="space-y-8">
+      {/* Заголовок страницы */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <h1 className="text-3xl font-bold text-white tracking-tight">{t('dash_title')}</h1>
+          {/* Можно добавить глобальные действия здесь */}
+      </div>
       
-      {/* 1. БЛОК: Статус сотрудников */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <LocationList 
-            locationName="Yenibosna" 
-            titleKey="dash_loc_yenibosna" 
-            colorClass="text-green-400" 
-            headerClass="bg-green-900/20 border-green-800"
-        />
-        <LocationList 
-            locationName="Göktürk" 
-            titleKey="dash_loc_gokturk" 
-            colorClass="text-blue-400" 
-            headerClass="bg-blue-900/20 border-blue-800"
-        />
+      {/* 1. БЛОК: Статус сотрудников (12-col Grid) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-6">
+            <LocationList 
+                locationName="Yenibosna" 
+                titleKey="dash_loc_yenibosna" 
+                accentColor="text-green-400"
+                headerColor="bg-green-900/10"
+            />
+        </div>
+        <div className="lg:col-span-6">
+            <LocationList 
+                locationName="Göktürk" 
+                titleKey="dash_loc_gokturk" 
+                accentColor="text-blue-400"
+                headerColor="bg-blue-900/10"
+            />
+        </div>
       </div>
 
-      {/* 2. БЛОК: KPI */}
+      {/* 2. БЛОК: KPI (12-col Grid) */}
       {salesStats.totals && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex items-center justify-between">
-            <div>
-              <div className="text-gray-500 text-xs font-bold uppercase">{t('dash_loc_yenibosna')}</div>
-              <div className="text-2xl font-bold text-white mt-1">{salesStats.totals.current.Yenibosna} <span className="text-sm font-normal text-gray-500">шт</span></div>
-            </div>
-            <div className={`text-right ${salesStats.totals.current.Yenibosna >= salesStats.totals.prev.Yenibosna ? 'text-green-500' : 'text-red-500'}`}>
-              <div className="text-lg font-bold">{getPercentageChange(salesStats.totals.current.Yenibosna, salesStats.totals.prev.Yenibosna)}</div>
-              <div className="text-xs text-gray-500">{t('dash_vs_prev')}</div>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-6">
+             <KPIWidget 
+                title={t('dash_loc_yenibosna')}
+                value={salesStats.totals.current.Yenibosna}
+                prevValue={salesStats.totals.prev.Yenibosna}
+             />
           </div>
-
-          <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex items-center justify-between">
-            <div>
-              <div className="text-gray-500 text-xs font-bold uppercase">{t('dash_loc_gokturk')}</div>
-              <div className="text-2xl font-bold text-white mt-1">{salesStats.totals.current.Göktürk} <span className="text-sm font-normal text-gray-500">шт</span></div>
-            </div>
-            <div className={`text-right ${salesStats.totals.current.Göktürk >= salesStats.totals.prev.Göktürk ? 'text-green-500' : 'text-red-500'}`}>
-              <div className="text-lg font-bold">{getPercentageChange(salesStats.totals.current.Göktürk, salesStats.totals.prev.Göktürk)}</div>
-              <div className="text-xs text-gray-500">{t('dash_vs_prev')}</div>
-            </div>
+          <div className="lg:col-span-6">
+             <KPIWidget 
+                title={t('dash_loc_gokturk')}
+                value={salesStats.totals.current.Göktürk}
+                prevValue={salesStats.totals.prev.Göktürk}
+             />
           </div>
         </div>
       )}
 
       {/* 3. БЛОК: График */}
-      <div className="bg-gray-800 p-5 rounded-lg border border-gray-700">
-        <div className="flex flex-wrap justify-between items-center mb-4 gap-4">
-            <h2 className="text-lg font-bold text-gray-300">{t('dash_sales_chart_title')}</h2>
+      <div className="card-surface p-6 lg:p-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+            <h2 className="text-xl font-semibold text-white">{t('dash_sales_chart_title')}</h2>
             
-            <div className="flex gap-2 w-full sm:w-auto">
-                <select 
-                    value={chartDate.year} 
-                    onChange={e => setChartDate({...chartDate, year: +e.target.value})} 
-                    className="bg-gray-700 border border-gray-600 rounded text-xs p-2 text-white outline-none flex-1 sm:flex-none"
-                >
-                    {[2024, 2025].map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-                <select 
-                    value={chartDate.month} 
-                    onChange={e => setChartDate({...chartDate, month: +e.target.value})} 
-                    className="bg-gray-700 border border-gray-600 rounded text-xs p-2 text-white outline-none flex-1 sm:flex-none"
-                >
-                    {Array.from({length:12},(_,i)=>i).map(i => <option key={i} value={i+1}>{t(`month_${i+1}`)}</option>)}
-                </select>
+            {/* Контролы графика - Touch Targets 48px */}
+            <div className="flex gap-4 w-full sm:w-auto">
+                <div className="relative flex-1 sm:flex-none">
+                    <select 
+                        value={chartDate.year} 
+                        onChange={e => setChartDate({...chartDate, year: +e.target.value})} 
+                        className="appearance-none w-full h-12 pl-4 pr-10 bg-gray-900 border border-gray-600 rounded-lg text-base text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none cursor-pointer"
+                    >
+                        {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    {/* Кастомная стрелка для селекта */}
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400">
+                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
+                </div>
+
+                <div className="relative flex-1 sm:flex-none">
+                    <select 
+                        value={chartDate.month} 
+                        onChange={e => setChartDate({...chartDate, month: +e.target.value})} 
+                        className="appearance-none w-full h-12 pl-4 pr-10 bg-gray-900 border border-gray-600 rounded-lg text-base text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none cursor-pointer"
+                    >
+                        {Array.from({length:12},(_,i)=>i).map(i => <option key={i} value={i+1}>{t(`month_${i+1}`)}</option>)}
+                    </select>
+                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400">
+                        <svg className="fill-current h-4 w-4" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div className="h-64 md:h-80 w-full">
+        {/* Контейнер графика с фиксированной минимальной высотой 300px */}
+        <div className="h-[350px] w-full">
           <SalesLineChart data={salesStats.chart} />
         </div>
       </div>
 
-      <ReportsCalendar />
+      <div className="pt-4">
+        <ReportsCalendar />
+      </div>
       
     </div>
   );

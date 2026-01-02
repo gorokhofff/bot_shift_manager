@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -58,6 +59,126 @@ async def get_missed_days_off(db, user_id: int, year: int, month: int) -> int:
             missed_days += 1
             
     return missed_days
+
+def calculate_hours_from_time_range(start_str: str, end_str: str) -> float:
+    """Вычисляет длительность смены в часах из строк 'HH:MM'"""
+    try:
+        if not start_str or not end_str: return 0
+        h1, m1 = map(int, start_str.split(':'))
+        h2, m2 = map(int, end_str.split(':'))
+        
+        minutes1 = h1 * 60 + m1
+        minutes2 = h2 * 60 + m2
+        
+        if minutes2 < minutes1: # Переход через полночь
+            minutes2 += 24 * 60
+            
+        return round((minutes2 - minutes1) / 60, 2)
+    except:
+        return 0
+
+async def calculate_planned_hours(db, user_id: int, role: str, location: str, year: int, month: int) -> float:
+    """
+    Считает плановые часы: (Кол-во рабочих дней в графике) * (Часы смены для роли)
+    """
+    # 1. Получаем настройки времени для роли в этой локации
+    # Пытаемся найти в role_schedules (актуальные)
+    cursor = await db.execute('''
+        SELECT default_start_time, default_end_time 
+        FROM role_schedules 
+        WHERE location = ? AND role = ? AND effective_to IS NULL
+    ''', (location, role))
+    role_setting = await cursor.fetchone()
+    
+    # Если нет в role_schedules, пробуем старую таблицу LocationRoleSettings (на всякий случай)
+    if not role_setting:
+        cursor = await db.execute('''
+            SELECT default_start_time, default_end_time 
+            FROM LocationRoleSettings 
+            WHERE location = ? AND role = ?
+        ''', (location, role))
+        role_setting = await cursor.fetchone()
+
+    # Если настроек нет совсем, берем стандарт 9 часов
+    daily_hours = 9.0
+    if role_setting:
+        daily_hours = calculate_hours_from_time_range(
+            role_setting['default_start_time'], 
+            role_setting['default_end_time']
+        )
+    
+    # 2. Считаем количество рабочих дней в графике
+    cursor = await db.execute('''
+        SELECT COUNT(*) as days_count
+        FROM employee_schedules
+        WHERE user_id = ? AND year = ? AND month = ? AND is_workday = 1
+    ''', (user_id, year, month))
+    row = await cursor.fetchone()
+    work_days = row['days_count'] if row else 0
+    
+    # Если график пустой (0 дней), возможно он не заполнен. 
+    # В таком случае возвращаем 0, чтобы админ обратил внимание.
+    
+    return round(work_days * daily_hours, 1)
+
+async def calculate_planned_hours(db, user_id: int, role: str, location: str, year: int, month: int) -> float:
+    """
+    Приоритет расчета:
+    1. Индивидуальные настройки на месяц (user_monthly_settings)
+    2. Общие настройки роли для локации (role_schedules)
+    3. Дефолт (9 часов)
+    """
+    
+    # 1. Проверяем индивидуальные настройки
+    cursor = await db.execute('''
+        SELECT start_time, end_time FROM user_monthly_settings
+        WHERE user_id = ? AND year = ? AND month = ?
+    ''', (user_id, year, month))
+    user_setting = await cursor.fetchone()
+    
+    start_time = None
+    end_time = None
+    
+    if user_setting:
+        start_time = user_setting['start_time']
+        end_time = user_setting['end_time']
+    else:
+        # 2. Если нет индивидуальных, берем общие для роли
+        cursor = await db.execute('''
+            SELECT default_start_time, default_end_time FROM role_schedules 
+            WHERE location = ? AND role = ? AND effective_to IS NULL
+        ''', (location, role))
+        role_setting = await cursor.fetchone()
+        
+        if role_setting:
+            start_time = role_setting['default_start_time']
+            end_time = role_setting['default_end_time']
+        else:
+            # Fallback на старую таблицу
+            cursor = await db.execute('''
+                SELECT default_start_time, default_end_time FROM LocationRoleSettings 
+                WHERE location = ? AND role = ?
+            ''', (location, role))
+            role_setting = await cursor.fetchone()
+            if role_setting:
+                start_time = role_setting['default_start_time']
+                end_time = role_setting['default_end_time']
+
+    # Расчет часов в день
+    daily_hours = 9.0
+    if start_time and end_time:
+        daily_hours = calculate_hours_from_time_range(start_time, end_time)
+        if daily_hours == 0: daily_hours = 9.0
+    
+    # 3. Считаем дни
+    cursor = await db.execute('''
+        SELECT COUNT(*) as days_count FROM employee_schedules
+        WHERE user_id = ? AND year = ? AND month = ? AND is_workday = 1
+    ''', (user_id, year, month))
+    row = await cursor.fetchone()
+    work_days = row['days_count'] if row else 0
+    
+    return round(work_days * daily_hours, 1)
 
 async def parse_sales_from_reports(establishment_location: str, year: int, month: int) -> Tuple[int, int, int]:
     async with await get_db() as db:
@@ -146,15 +267,12 @@ async def generate_monthly_payroll_v3(draft_data: PayrollReportCreateV2):
             users = await cursor.fetchall()
             
             for u in users:
-                # 4. План часов
-                cursor_plan = await db.execute(
-                    "SELECT planned_hours FROM role_work_plans WHERE role = ? AND year = ? AND month = ?",
-                    (u['role'], draft_data.year, draft_data.month)
+                # 4. НОВОЕ: План часов считаем из расписания
+                planned_hours = await calculate_planned_hours(
+                    db, u['id'], u['role'], loc, draft_data.year, draft_data.month
                 )
-                plan_row = await cursor_plan.fetchone()
-                planned_hours = plan_row['planned_hours'] if plan_row else 160
                 
-                # 5. Факт часы
+                # 5. Факт часов
                 cursor_hours = await db.execute('''
                     SELECT SUM(duration_hours) as total_hours 
                     FROM Shifts 
@@ -176,15 +294,15 @@ async def generate_monthly_payroll_v3(draft_data: PayrollReportCreateV2):
                         payroll_report_id, user_id, role, 
                         sales_1_15, sales_16_31, total_sales,
                         missed_days_off, overtime_pay,
-                        actual_hours,
+                        actual_hours, planned_hours,
                         monthly_total,
                         created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ''', (
                     report_id, u['id'], u['role'], 
                     s15, s31, (s15 + s31),
                     missed_days, overtime_pay,
-                    actual_hours,
+                    actual_hours, planned_hours,
                     calc_total
                 ))
             
@@ -219,6 +337,18 @@ async def update_payroll_entry_v2(entry_id: int, data: PayrollEntryUpdateV2):
             ))
             await db.commit()
             return {"status": "updated"}
+        except Exception as e:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+        
+# НОВЫЙ ЭНДПОИНТ: Удаление строки
+@router.delete("/payroll/entries-v2/{entry_id}")
+async def delete_payroll_entry(entry_id: int):
+    async with await get_db() as db:
+        try:
+            await db.execute("DELETE FROM payroll_entries WHERE id = ?", (entry_id,))
+            await db.commit()
+            return {"status": "deleted"}
         except Exception as e:
             await db.rollback()
             raise HTTPException(status_code=500, detail=str(e))
